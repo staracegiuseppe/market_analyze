@@ -65,7 +65,7 @@ CLAUDE_PROMPT = (
 )
 
 PPLX_PROMPT = (
-    'Return max 3 recent headlines for {sym}. '
+    'Return max 3 recent headlines for SYMBOL. '
     'Prioritize earnings, guidance, M&A, regulation. Skip commentary. '
     'JSON only: [{"headline":"...","source":"...","date":"..."}]'
 )
@@ -112,7 +112,7 @@ def enrich_with_perplexity(sym: str, api_key: str) -> List[Dict]:
         log.info(f"[AI] {sym}: Perplexity cache hit")
         return cached
 
-    prompt = PPLX_PROMPT.format(sym=sym)
+    prompt = PPLX_PROMPT.replace("SYMBOL", sym)
     try:
         r = requests.post(
             "https://api.perplexity.ai/chat/completions",
