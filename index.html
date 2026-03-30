@@ -262,14 +262,13 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 
 <script>
 // ── Base URL for HA Ingress ──────────────────────────────────────────────────
-// Pathname is often /hassio/ingress/<slug> or /api/hassio_ingress/<token> — the last
-// segment is NOT a filename; only strip it when it looks like a file (has an extension).
 function api(path){
-  let base = window.location.pathname;
-  if (base.endsWith('/')) base = base.slice(0, -1);
-  const last = base.split('/').pop() || '';
-  if (last.includes('.')) base = base.replace(/\/[^/]*$/, '');
-  return base + path;
+  // Rimuovi file finale (index.html, ecc.) e trailing slash
+  // Funziona su: / , /index.html , /api/hassio_ingress/TOKEN/ , /api/hassio_ingress/TOKEN/index.html
+  const base=window.location.pathname
+    .replace(/\/(index\.html|[^/]+\.[^/]+)$/, '')  // rimuovi file
+    .replace(/\/+$/, '');                              // rimuovi trailing slash
+  return base+path;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -408,7 +407,15 @@ function closeDetail(e){
 // ── Load signals ──────────────────────────────────────────────────────────────
 async function loadSignals(){
   try{
-    const r=await fetch(api('/api/signals')); if(!r.ok)return;
+    const r=await fetch(api('/api/signals'));
+    if(!r.ok){
+      console.error('loadSignals HTTP', r.status, 'url:', api('/api/signals'));
+      document.getElementById('sig-grid').innerHTML=
+        '<div style="grid-column:1/-1;padding:30px;text-align:center;color:#E03838">'+
+        'Errore caricamento segnali (HTTP '+r.status+')<br>'+
+        '<small style="color:#6880A0">URL: '+api('/api/signals')+'</small></div>';
+      return;
+    }
     const d=await r.json();
     allSignals=d.signals||[];
     const active=allSignals.filter(s=>['BUY','SELL','WATCHLIST'].includes(s.action));
@@ -527,7 +534,11 @@ function renderBacktest(d){
 // ── Settings ──────────────────────────────────────────────────────────────────
 async function loadSettings(){
   try{
-    const r=await fetch(api('/api/config')); if(!r.ok)return;
+    const r=await fetch(api('/api/config'));
+    if(!r.ok){
+      console.error('loadSettings HTTP', r.status, 'url:', api('/api/config'));
+      return;
+    }
     cfg=await r.json();
     document.getElementById('cfg-api').innerHTML=(
       '<div style="font-size:11px;line-height:2.2;color:#6880A0">'
@@ -582,11 +593,25 @@ function addLog(msg, cls=''){
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init(){
-  await loadSettings();
-  await loadSignals();
+  // Retry con backoff: il backend potrebbe non essere ancora pronto
+  for(let attempt=1; attempt<=3; attempt++){
+    try{
+      await loadSettings();
+      await loadSignals();
+      break;
+    }catch(e){
+      console.warn('Init attempt '+attempt+' failed:', e);
+      if(attempt<3) await new Promise(r=>setTimeout(r, attempt*1500));
+    }
+  }
   const count=allSignals.length;
   document.getElementById('hdr-count').textContent=count+' assets';
-  // Auto-refresh every 5 min
+  // Aggiorna badge API key basandosi sulla config
+  if(cfg && cfg.has_anthropic){
+    const kb=document.getElementById('hdr-key');
+    kb.textContent='● Claude OK'; kb.className='badge b-ok';
+  }
+  // Auto-refresh ogni 5 min
   setInterval(loadSignals, 300000);
 }
 
