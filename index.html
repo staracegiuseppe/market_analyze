@@ -262,9 +262,14 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 
 <script>
 // ── Base URL for HA Ingress ──────────────────────────────────────────────────
+// Pathname is often /hassio/ingress/<slug> or /api/hassio_ingress/<token> — the last
+// segment is NOT a filename; only strip it when it looks like a file (has an extension).
 function api(path){
-  const base=window.location.pathname.replace(/\/[^/]*$/,'');
-  return base+path;
+  let base = window.location.pathname;
+  if (base.endsWith('/')) base = base.slice(0, -1);
+  const last = base.split('/').pop() || '';
+  if (last.includes('.')) base = base.replace(/\/[^/]*$/, '');
+  return base + path;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
