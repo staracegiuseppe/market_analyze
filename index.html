@@ -119,6 +119,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   <div class="tab" onclick="showTab('backtest')">⊞ Backtest</div>
   <div class="tab" onclick="showTab('log')">▶ Log</div>
   <div class="tab" onclick="showTab('settings')">⚙ Settings</div>
+  <div class="tab" onclick="showTab('smartmoney')">🏦 Smart Money</div>
 </div>
 
 <!-- TAB: SIGNALS -->
@@ -261,6 +262,56 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 
 <!-- overlay rimosso: card espanse inline -->
 
+<!-- TAB: SMART MONEY -->
+<div class="tc" id="tab-smartmoney">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div style="font-size:16px;font-weight:700;color:#F9FAFB">🏦 Smart Money Analysis</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:3px">Flussi istituzionali · 13F Filings · Insider Buying · Rotazioni settoriali</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="spin" id="sm-spin"></div>
+      <button class="btn" onclick="refreshSmartMoney()">↻ Aggiorna analisi</button>
+    </div>
+  </div>
+
+  <div id="sm-meta" style="font-size:10px;color:#6B7280;margin-bottom:12px"></div>
+
+  <!-- Loading -->
+  <div id="sm-loading" style="text-align:center;padding:40px;color:#6B7280">
+    <div style="font-size:14px;margin-bottom:8px">Caricamento analisi istituzionale...</div>
+    <div style="font-size:11px">La prima analisi può richiedere 20-30 secondi</div>
+  </div>
+
+  <!-- Errore -->
+  <div id="sm-error" style="display:none;padding:16px;background:#1A0A0A;border:1px solid #DC262644;border-radius:8px;color:#DC2626;font-size:12px"></div>
+
+  <!-- Tabella opportunità -->
+  <div id="sm-content" style="display:none">
+
+    <!-- Score summary bar -->
+    <div id="sm-summary-bar" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px"></div>
+
+    <!-- Opportunità -->
+    <div id="sm-opportunities"></div>
+
+    <!-- Analisi strategica -->
+    <div id="sm-strategic" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:16px 0"></div>
+
+    <!-- Warning -->
+    <div id="sm-warnings" style="padding:10px 14px;background:#111820;border:1px solid #DC262622;border-radius:6px;margin-top:10px">
+      <div style="font-size:9px;color:#DC2626;letter-spacing:.1em;font-weight:600;margin-bottom:6px">⚠ AVVERTENZE ANALISI</div>
+      <div id="sm-warnings-list"></div>
+    </div>
+
+    <!-- Disclaimer -->
+    <div style="margin-top:12px;font-size:10px;color:#374151;text-align:center;border-top:1px solid #1F2937;padding-top:12px">
+      L'analisi Smart Money è puramente informativa e non costituisce consulenza finanziaria.<br>
+      I dati 13F hanno un ritardo di 45 giorni. Verifica sempre le informazioni prima di agire.
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Base URL for HA Ingress ──────────────────────────────────────────────────
 function api(path){
@@ -279,11 +330,12 @@ let allSignals=[], filters={market:'all',action:'all'}, cfg={};
 function showTab(id){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
-  const tabs=['signals','assets','backtest','log','settings'];
+  const tabs=['signals','assets','backtest','log','settings','smartmoney'];
   document.querySelectorAll('.tab')[tabs.indexOf(id)].classList.add('active');
   document.getElementById('tab-'+id).classList.add('active');
   if(id==='assets')loadAssets();
   if(id==='settings')loadSettings();
+  if(id==='smartmoney')loadSmartMoney();
 }
 
 // ── Signal color ──────────────────────────────────────────────────────────────
@@ -801,10 +853,160 @@ async function init(){
   setInterval(loadSignals, 300000);
 }
 
+
+// ── Smart Money ───────────────────────────────────────────────────────────────
+const SM_ACTION_COL = {Accumulate:'#16A34A', Monitor:'#F59E0B', Avoid:'#DC2626'};
+const SM_TECH_COL   = {Bullish:'#16A34A', Neutral:'#F59E0B', Weak:'#DC2626'};
+const SM_SIGNAL_ICON= {'New Position':'🆕','Increase':'📈','Convergence':'🔄','Insider Buy':'👔'};
+
+function buildOpportunityCard(opp){
+  const actCol  = SM_ACTION_COL[opp.action]  || '#6B7280';
+  const techCol = SM_TECH_COL[opp.technical_status] || '#F59E0B';
+  const sigIcon = SM_SIGNAL_ICON[opp.signal_type] || '📊';
+  const score   = opp.score||0;
+  const scoreCol= score>=70?'#16A34A':score>=50?'#F59E0B':'#DC2626';
+  const investors= (opp.key_investors||[]).join(', ');
+
+  return `<div style="background:#111827;border:1px solid #1F2937;border-radius:10px;margin-bottom:14px;overflow:hidden">
+    <!-- Header -->
+    <div style="padding:14px 18px;background:#0D1420;border-bottom:1px solid #1F2937;display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:13px">${sigIcon}</span>
+          <span style="font-size:10px;font-weight:600;color:${actCol};background:${actCol}22;
+                padding:2px 8px;border-radius:10px;border:1px solid ${actCol}44">${opp.signal_type||''}</span>
+        </div>
+        <div style="font-size:18px;font-weight:800;color:#F9FAFB">${opp.company||''}</div>
+        <div style="font-size:12px;color:#9CA3AF;margin-top:2px">${opp.ticker||''} · ${opp.sector||''}</div>
+        ${investors?`<div style="font-size:10px;color:#6B7280;margin-top:4px">👥 ${investors}</div>`:''}
+      </div>
+      <div style="text-align:center;flex-shrink:0;margin-left:16px">
+        <div style="font-size:11px;color:#6B7280;letter-spacing:.1em;margin-bottom:3px">SCORE</div>
+        <div style="font-size:32px;font-weight:900;color:${scoreCol};font-family:monospace;line-height:1">${score}</div>
+        <div style="height:4px;background:#1F2937;border-radius:2px;margin-top:5px;width:60px">
+          <div style="height:4px;width:${score}%;background:${scoreCol};border-radius:2px"></div>
+        </div>
+        <div style="margin-top:8px;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;
+             background:${actCol}22;color:${actCol};border:1px solid ${actCol}44">${opp.action||''}</div>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:14px 18px">
+      <!-- Perché conta -->
+      <div style="margin-bottom:12px">
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px">Perché questo segnale conta</div>
+        <div style="font-size:12px;color:#D1D5DB;line-height:1.7">${opp.why_matters||''}</div>
+      </div>
+
+      <!-- Grid info -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+        <div style="background:#0A0F1A;border-radius:6px;padding:10px">
+          <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">FONDAMENTALI</div>
+          <div style="font-size:11px;color:#9CA3AF;line-height:1.6">${opp.fundamental_snapshot||'N/A'}</div>
+        </div>
+        <div style="background:#0A0F1A;border-radius:6px;padding:10px">
+          <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">STATO TECNICO</div>
+          <div style="font-size:14px;font-weight:700;color:${techCol}">${opp.technical_status||'Neutral'}</div>
+        </div>
+        <div style="background:#0A0F1A;border-radius:6px;padding:10px">
+          <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">RISCHI</div>
+          <div style="font-size:11px;color:#9CA3AF;line-height:1.6">${opp.risk_summary||'N/A'}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function loadSmartMoney(forceRefresh=false){
+  document.getElementById('sm-loading').style.display='block';
+  document.getElementById('sm-content').style.display='none';
+  document.getElementById('sm-error').style.display='none';
+
+  try{
+    if(forceRefresh){
+      await fetch(api('/api/smart-money/refresh'),{method:'POST'});
+      await new Promise(r=>setTimeout(r,3000));
+    }
+    const r = await fetch(api('/api/smart-money'));
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+
+    document.getElementById('sm-loading').style.display='none';
+
+    if(d.error){
+      document.getElementById('sm-error').style.display='block';
+      document.getElementById('sm-error').textContent='⚠ '+d.error;
+      return;
+    }
+
+    const opps = d.opportunities||[];
+    const summ = d.strategic_summary||{};
+    const warn = d.warnings||[];
+    const qual = d.data_quality||'?';
+    const qualCol = qual==='high'?'#16A34A':qual==='medium'?'#F59E0B':'#DC2626';
+    const date = d.analysis_date||'';
+    const cached = d.computed_at?(' · Aggiornato: '+new Date(d.computed_at).toLocaleTimeString('it')):'';
+
+    document.getElementById('sm-meta').textContent =
+      `Qualità dati: ${qual.toUpperCase()} · ${opps.length} opportunità trovate · ${date}${cached}`;
+    document.getElementById('sm-meta').style.color = qualCol;
+
+    // Score summary
+    const nAcc  = opps.filter(o=>o.action==='Accumulate').length;
+    const nMon  = opps.filter(o=>o.action==='Monitor').length;
+    const nAvoid= opps.filter(o=>o.action==='Avoid').length;
+    document.getElementById('sm-summary-bar').innerHTML = [
+      ['Accumulate','#16A34A',nAcc],['Monitor','#F59E0B',nMon],['Avoid','#DC2626',nAvoid]
+    ].map(([lbl,col,n])=>
+      `<div style="background:#111827;border:1px solid #1F2937;border-radius:8px;padding:12px 16px;text-align:center">
+        <div style="font-size:24px;font-weight:800;color:${col}">${n}</div>
+        <div style="font-size:10px;color:#6B7280;margin-top:2px">${lbl}</div>
+      </div>`
+    ).join('');
+
+    // Opportunità ordinate per score desc
+    const sorted = [...opps].sort((a,b)=>(b.score||0)-(a.score||0));
+    document.getElementById('sm-opportunities').innerHTML =
+      sorted.length ? sorted.map(buildOpportunityCard).join('') :
+      '<div style="padding:30px;text-align:center;color:#6B7280">Nessuna opportunità trovata con i criteri attuali</div>';
+
+    // Analisi strategica
+    document.getElementById('sm-strategic').innerHTML = [
+      ['Trend emergente', summ.trend],
+      ['Insight settoriali', summ.sector_insights],
+      ['Conviction Level', summ.conviction_level],
+    ].map(([title,content])=>content?
+      `<div style="background:#0A0F1A;border-radius:8px;padding:14px">
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:6px">${title.toUpperCase()}</div>
+        <div style="font-size:12px;color:#D1D5DB;line-height:1.6">${content}</div>
+      </div>`:''
+    ).join('');
+
+    // Warning
+    document.getElementById('sm-warnings-list').innerHTML =
+      warn.map(w=>`<div style="font-size:11px;color:#9CA3AF;margin-bottom:4px">⚠ ${w}</div>`).join('');
+
+    document.getElementById('sm-content').style.display='block';
+
+  }catch(e){
+    document.getElementById('sm-loading').style.display='none';
+    document.getElementById('sm-error').style.display='block';
+    document.getElementById('sm-error').textContent='Errore: '+e.message;
+  }
+}
+
+async function refreshSmartMoney(){
+  const sp=document.getElementById('sm-spin');
+  sp.classList.add('on');
+  await loadSmartMoney(true);
+  sp.classList.remove('on');
+}
+
 window.addEventListener('DOMContentLoaded', init);
 window.showTab=showTab; window.setFilter=setFilter; window.refreshScanner=refreshScanner;
 window.runBacktest=runBacktest; window.testEmail=testEmail; window.closeDetail=closeDetail;
-window.showDetail=showDetail; window.loadAssets=loadAssets; window.loadSettings=loadSettings;
+window.showDetail=showDetail; window.loadAssets=loadAssets; window.loadSettings=loadSettings; window.loadSmartMoney=loadSmartMoney; window.refreshSmartMoney=refreshSmartMoney;
 </script>
 </body>
 </html>

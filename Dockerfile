@@ -10,6 +10,7 @@ COPY market_data.py .
 COPY signal_engine.py .
 COPY ai_validation.py .
 COPY backtest_engine.py .
+COPY smart_money.py .
 COPY mailer.py .
 COPY main.py .
 COPY index.html .

@@ -5,6 +5,11 @@ from email.mime.text      import MIMEText
 from datetime             import datetime
 from typing               import List, Dict, Any, Optional
 import requests as _req
+try:
+    from smart_money import build_email_section as _sm_section
+    _HAS_SM = True
+except ImportError:
+    _HAS_SM = False
 
 log = logging.getLogger("mailer")
 
@@ -541,7 +546,7 @@ def build_html_report(results: List[Dict], run_ts: str, next_ts: str) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict) -> bool:
+def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict, smart_money_data: Dict = None) -> bool:
     if not cfg.get("email_enabled"):
         return False
 
@@ -559,6 +564,11 @@ def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict) -> bo
         return False
 
     html_body = build_html_report(results, run_ts, next_ts)
+    if smart_money_data and _HAS_SM:
+        sm_html = _sm_section(smart_money_data)
+        if sm_html:
+            html_body = html_body.replace('</div></body></html>', sm_html + '</div></body></html>')
+            log.info('[MAILER] Sezione Smart Money aggiunta all\'email')
 
     n_buy  = sum(1 for r in active if r.get("action") == "BUY")
     n_sell = sum(1 for r in active if r.get("action") == "SELL")

@@ -10,6 +10,7 @@ from typing     import Optional, List
 import uvicorn
 
 from market_data    import fetch_all, load_assets
+from smart_money    import run_smart_money_analysis, build_email_section
 from signal_engine  import run_scanner, is_trading_hours
 from ai_validation  import apply_ai_enrichment
 from backtest_engine import backtest_symbol, backtest_batch, BacktestConfig
@@ -59,13 +60,14 @@ log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
 
 # ── State ──────────────────────────────────────────────────────────────────────
 state = {
-    "last_run":  None,
-    "next_run":  None,
-    "running":   False,
-    "signals":   [],
-    "tech_data": {},
-    "email_last":None,
-    "email_ok":  None,
+    "last_run":    None,
+    "next_run":    None,
+    "running":     False,
+    "signals":     [],
+    "tech_data":   {},
+    "email_last":  None,
+    "email_ok":    None,
+    "smart_money": None,
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -122,7 +124,7 @@ def run_scan():
     if OPTIONS.get("email_enabled"):
         try:
             # Adapt signals list for mailer (expects 'results' format)
-            ok = send_report(signals, run_ts, next_ts, OPTIONS)
+            ok = send_report(signals, run_ts, next_ts, OPTIONS, state.get('smart_money'))
             state["email_last"] = run_ts; state["email_ok"] = ok
             log.info(f"[STEP 4/4 EMAIL] {'OK' if ok else 'FAILED'}")
         except Exception as e:
@@ -227,6 +229,24 @@ async def get_backtest(symbol: str):
     sym = symbol.upper()
     if sym in _backtest_cache: return _backtest_cache[sym]
     raise HTTPException(404, f"No backtest for {symbol}. POST /api/backtest?symbol={symbol}")
+
+@app.get("/api/smart-money")
+async def get_smart_money():
+    """Restituisce l'ultima analisi istituzionale. Usa cache 6h."""
+    if state.get("smart_money"):
+        return state["smart_money"]
+    return {"error": "Analisi non ancora eseguita", "opportunities": []}
+
+@app.post("/api/smart-money/refresh")
+async def refresh_smart_money(background_tasks: BackgroundTasks):
+    """Forza aggiornamento analisi istituzionale."""
+    symbols = [a["symbol"] for a in ASSETS]
+    def _run():
+        result = run_smart_money_analysis(symbols, CLAUDE_KEY, PPLX_KEY, force_refresh=True)
+        state["smart_money"] = result
+        log.info("[SMART_MONEY] Analisi aggiornata via API")
+    background_tasks.add_task(_run)
+    return {"status": "started"}
 
 @app.post("/api/email/test")
 async def email_test():
