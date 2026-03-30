@@ -156,6 +156,15 @@ async def root():  return await _html()
 @app.get("/index.html", response_class=HTMLResponse)
 async def idx():   return await _html()
 
+@app.exception_handler(404)
+async def not_found_handler(request, exc):
+    """Catch-all: qualsiasi path sconosciuto serve index.html (SPA pattern)."""
+    # Le API restituiscono 404 JSON normale — solo le route non-API servono il frontend
+    if request.url.path.startswith("/api/"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await _html()
+
 @app.get("/health")
 async def health():
     return {"status":"ok","version":"2.0.0",
