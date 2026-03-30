@@ -208,24 +208,26 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
 
     # ── Entry / SL / TP from ATR and S/R ─────────────────────────────────────
     entry = sl = tp = rr = None
-    if atr_val and sup and res:
+    if atr_val and atr_val > 0:
+        # Usa ATR puro per SL/TP — garantisce R:R sensato indipendentemente da S/R
+        # S/R usato solo come riferimento informativo nei log
         if action == "BUY":
             entry = round(price, 4)
-            sl    = round(max(sup, price - 1.5 * atr_val), 4)
-            tp    = round(min(res, price + 3.0 * atr_val), 4)
+            sl    = round(price - 1.5 * atr_val, 4)
+            tp    = round(price + 2.5 * atr_val, 4)
         elif action == "SELL":
             entry = round(price, 4)
-            sl    = round(min(res, price + 1.5 * atr_val), 4)
-            tp    = round(max(sup, price - 3.0 * atr_val), 4)
+            sl    = round(price + 1.5 * atr_val, 4)
+            tp    = round(price - 2.5 * atr_val, 4)
         elif action == "WATCHLIST":
-            if net > 0:  # watchlist bullish
+            if net > 0:
                 entry = round(price, 4)
                 sl    = round(price - 2.0 * atr_val, 4)
-                tp    = round(price + 2.5 * atr_val, 4)
-            else:        # watchlist bearish
+                tp    = round(price + 2.0 * atr_val, 4)
+            else:
                 entry = round(price, 4)
                 sl    = round(price + 2.0 * atr_val, 4)
-                tp    = round(price - 2.5 * atr_val, 4)
+                tp    = round(price - 2.0 * atr_val, 4)
 
         if entry and sl and tp:
             risk   = abs(entry - sl)

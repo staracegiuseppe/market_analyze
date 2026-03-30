@@ -273,10 +273,9 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
     log.info(f"[MARKET] → {symbol}: avvio fetch (period={period})")
 
     # Mappa simboli speciali (indici)
+    # FTSEMIB.MI: Yahoo non supporta ^FTSEMIB via API diretta
+    # Tentativo 1: FTSEMIB.MI, fallback FTSEMIB.MI con parametro diverso
     yf_symbol = symbol
-    if symbol == "FTSEMIB.MI":
-        yf_symbol = "^FTSEMIB"
-        log.info(f"[MARKET] {symbol}: remappato → {yf_symbol}")
 
     raw = _yahoo_fetch_raw(yf_symbol, range_=period)
     if raw is None:

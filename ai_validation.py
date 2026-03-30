@@ -59,7 +59,7 @@ CLAUDE_PROMPT = (
     'Input: compact quantitative snapshot.\n'
     'Return strict JSON only:\n'
     '{"summary":"max 40 words","risk_flags":["short"],'
-    '"confidence_adjustment":-5,"news_bias":"neutral","action_override":"none"}\n'
+    '"confidence_adjustment":0,"news_bias":"neutral","action_override":"none"}\n'
     'Rules: use only provided data. action_override must be "none" unless data strongly contradicts.\n'
     'Snapshot:\n'
 )
@@ -126,7 +126,12 @@ def enrich_with_perplexity(sym: str, api_key: str) -> List[Dict]:
         if r.status_code == 200:
             text = r.json()["choices"][0]["message"]["content"]
             clean = text.replace("```json","").replace("```","").strip()
+            if not clean or not clean.startswith("["):
+                log.info(f"[AI] {sym}: Perplexity risposta non JSON array — skip")
+                return []
             result = json.loads(clean)
+            if not isinstance(result, list):
+                result = []
             _set_cache(f"pplx_{sym}", result)
             log.info(f"[AI] {sym}: Perplexity OK {len(result)} headlines")
             return result
@@ -166,7 +171,11 @@ def apply_ai_enrichment(
         pplx_news = enrich_with_perplexity(sym, pplx_key) if pplx_key else []
 
         # Apply confidence adjustment (max ±5 from AI)
-        adj = max(-5, min(5, int(claude_r.get("confidence_adjustment", 0))))
+        try:
+            raw_adj = claude_r.get("confidence_adjustment", 0)
+            adj = max(-5, min(5, int(float(raw_adj))))
+        except (ValueError, TypeError):
+            adj = 0
         enriched_map[sym] = {
             "ai_summary":    claude_r.get("summary", ""),
             "ai_risk_flags": claude_r.get("risk_flags", []),
