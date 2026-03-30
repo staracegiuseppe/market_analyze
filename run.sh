@@ -1,7 +1,6 @@
 #!/bin/sh
-# run.sh - Gold Intelligence v1.5.0
-# Bind 127.0.0.1: porta accessibile SOLO da HA Ingress, non dalla LAN
-# Questo elimina l'errore "invalid authentication" nel log HA
+# run.sh - Market Analyze v2.0.0
+# Bind 127.0.0.1: accessibile SOLO via HA Ingress, non dalla LAN
 
 OPTIONS=/data/options.json
 
@@ -19,14 +18,14 @@ except Exception as e:
 
 export ANTHROPIC_API_KEY=$(get_opt "anthropic_api_key" "")
 export PERPLEXITY_API_KEY=$(get_opt "perplexity_api_key" "")
-export SCORE_THRESHOLD=$(get_opt "score_threshold" "30")
+export SCORE_THRESHOLD=$(get_opt "score_threshold" "25")
 export ENGINE_MODE=$(get_opt "engine_mode" "auto")
 export SCHEDULER_MINUTES=$(get_opt "scheduler_interval_minutes" "60")
 export BIND_HOST="127.0.0.1"
 export INGRESS_PORT=$(get_opt "ingress_port" "8099")
 
-echo "[Gold Intelligence v1.5.0] Avvio..."
-echo "[Config] Engine=${ENGINE_MODE} | Soglia=+-${SCORE_THRESHOLD} | Scheduler=${SCHEDULER_MINUTES}min"
-echo "[Config] Bind=${BIND_HOST}:${INGRESS_PORT} | Perplexity=$([ -n "${PERPLEXITY_API_KEY}" ] && echo ON || echo OFF)"
+echo "[Market Analyze v2.0.0] Starting..."
+echo "[Config] Threshold=+-${SCORE_THRESHOLD} | Scheduler=${SCHEDULER_MINUTES}min | Bind=${BIND_HOST}:${INGRESS_PORT}"
+echo "[Config] Claude=$([ -n "${ANTHROPIC_API_KEY}" ] && echo ON || echo MISSING) | Perplexity=$([ -n "${PERPLEXITY_API_KEY}" ] && echo ON || echo OFF)"
 
 exec python3 /app/main.py

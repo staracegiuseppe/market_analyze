@@ -1,8 +1,8 @@
-name: Gold Intelligence
+name: Market Analyze
 version: "2.0.0"
-slug: gold_intelligence
-description: Analisi mercato oro XAU/USD - Smart Money Score + Claude AI + Perplexity + Segnali Trading + Report Email.
-url: https://github.com/staracegiuseppe/gold_intelligence
+slug: market_analyze
+description: Multi-Market Scanner - Italy / Europe / USA - Quant Signals + Claude AI + Perplexity + Backtest + Email Report.
+url: https://github.com/staracegiuseppe/market_analyze
 
 arch:
   - aarch64
@@ -17,8 +17,8 @@ init: false
 ingress: true
 ingress_port: 8099
 ingress_entry: /
-panel_icon: mdi:gold
-panel_title: Gold Intelligence
+panel_icon: mdi:chart-line
+panel_title: Market Analyze
 
 homeassistant_api: false
 auth_api: false
@@ -26,7 +26,7 @@ auth_api: false
 options:
   anthropic_api_key: ""
   perplexity_api_key: ""
-  score_threshold: 30
+  score_threshold: 25
   engine_mode: "auto"
   scheduler_interval_minutes: 60
   scheduler_enabled: true
