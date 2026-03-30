@@ -1,0 +1,58 @@
+name: Market Analyze
+version: "2.0.0"
+slug: market_analyze
+description: Multi-Market Scanner - Italy / Europe / USA - Quant Signals + Claude AI + Perplexity + Backtest + Email Report.
+url: https://github.com/staracegiuseppe/market_analyze
+
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+
+startup: application
+boot: auto
+init: false
+
+ingress: true
+ingress_port: 8099
+ingress_entry: /
+panel_icon: mdi:chart-line
+panel_title: Market Analyze
+
+homeassistant_api: false
+auth_api: false
+
+options:
+  anthropic_api_key: ""
+  perplexity_api_key: ""
+  score_threshold: 25
+  engine_mode: "auto"
+  scheduler_interval_minutes: 60
+  scheduler_enabled: true
+  email_enabled: false
+  email_to: ""
+  email_from: ""
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_user: ""
+  smtp_password: ""
+  smtp_tls: true
+  email_min_score: 40
+
+schema:
+  anthropic_api_key: str
+  perplexity_api_key: str
+  score_threshold: int
+  engine_mode: str
+  scheduler_interval_minutes: int
+  scheduler_enabled: bool
+  email_enabled: bool
+  email_to: str
+  email_from: str
+  smtp_host: str
+  smtp_port: int
+  smtp_user: str
+  smtp_password: str
+  smtp_tls: bool
+  email_min_score: int

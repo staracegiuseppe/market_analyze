@@ -1,1 +1,3 @@
-channel: stable
+name: Market Analyze
+url: https://github.com/staracegiuseppe/market_analyze
+maintainer: Giuseppe Starace <staracegiuseppe@github.com>
