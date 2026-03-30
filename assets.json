@@ -4,7 +4,7 @@
     "yahoo_symbol": "FTSEMIB.MI",
     "name": "FTSE MIB Index",
     "full_name": "FTSE MIB - Financial Times Stock Exchange Milano Indice di Borsa",
-    "isin": "N/A",
+    "isin": "N/A - Indice (non ha ISIN)",
     "market": "IT",
     "country": "IT",
     "asset_type": "index",

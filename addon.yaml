@@ -1,7 +1,7 @@
 name: Market Analyze
-version: "2.2.0"
+version: "2.3.0"
 slug: market_analyze
-description: Multi-Market Scanner - Italy / Europe / USA - Quant Signals + Claude AI + Perplexity + Backtest + Email Report.
+description: Multi-Market Scanner - Italy / Europe / USA - Quant Signals + Claude AI + Perplexity + Backtest + Gmail OAuth2.
 url: https://github.com/staracegiuseppe/market_analyze
 
 arch:
@@ -27,12 +27,14 @@ options:
   anthropic_api_key: ""
   perplexity_api_key: ""
   score_threshold: 25
-  engine_mode: "auto"
   scheduler_interval_minutes: 60
   scheduler_enabled: true
   email_enabled: false
   email_to: ""
   email_from: ""
+  oauth2_client_id: ""
+  oauth2_client_secret: ""
+  oauth2_refresh_token: ""
   smtp_host: "smtp.gmail.com"
   smtp_port: 587
   smtp_user: ""
@@ -44,12 +46,14 @@ schema:
   anthropic_api_key: str
   perplexity_api_key: str
   score_threshold: int
-  engine_mode: str
   scheduler_interval_minutes: int
   scheduler_enabled: bool
   email_enabled: bool
   email_to: str
   email_from: str
+  oauth2_client_id: str
+  oauth2_client_secret: str
+  oauth2_refresh_token: str
   smtp_host: str
   smtp_port: int
   smtp_user: str
