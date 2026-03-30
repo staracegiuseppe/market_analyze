@@ -51,7 +51,7 @@ CLAUDE_KEY        = os.getenv("ANTHROPIC_API_KEY","")
 PPLX_KEY          = os.getenv("PERPLEXITY_API_KEY","")
 SCHEDULER_MINUTES = int(OPTIONS.get("scheduler_interval_minutes",60))
 SCHEDULER_ENABLED = bool(OPTIONS.get("scheduler_enabled",True))
-BIND_HOST         = os.getenv("BIND_HOST","127.0.0.1")
+BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
 PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
 ASSETS = load_assets()

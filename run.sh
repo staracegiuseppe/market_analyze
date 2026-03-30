@@ -24,7 +24,7 @@ export ANTHROPIC_API_KEY=$(get_opt "anthropic_api_key" "")
 export PERPLEXITY_API_KEY=$(get_opt "perplexity_api_key" "")
 export SCORE_THRESHOLD=$(get_opt "score_threshold" "25")
 export SCHEDULER_MINUTES=$(get_opt "scheduler_interval_minutes" "60")
-export BIND_HOST="127.0.0.1"
+export BIND_HOST="0.0.0.0"
 export INGRESS_PORT="8099"
 
 echo "[Market Analyze v2.1] Starting on ${BIND_HOST}:${INGRESS_PORT}"
