@@ -1,6 +1,11 @@
 #!/bin/sh
-# run.sh - Market Analyze v2.0.0
-# Bind 127.0.0.1: accessibile SOLO via HA Ingress, non dalla LAN
+# run.sh - Market Analyze v2.1
+# Bind 127.0.0.1: solo HA Ingress, non esposto su LAN
+# unset proxy: evita che variabili d'ambiente proxy interferiscano con Yahoo Finance
+
+# ── Rimuovi proxy che potrebbero bloccare Yahoo Finance ──────────────────────
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY
+export NO_PROXY="*"
 
 OPTIONS=/data/options.json
 
@@ -24,8 +29,10 @@ export SCHEDULER_MINUTES=$(get_opt "scheduler_interval_minutes" "60")
 export BIND_HOST="127.0.0.1"
 export INGRESS_PORT=$(get_opt "ingress_port" "8099")
 
-echo "[Market Analyze v2.0.0] Starting..."
+echo "[Market Analyze v2.1] Starting..."
 echo "[Config] Threshold=+-${SCORE_THRESHOLD} | Scheduler=${SCHEDULER_MINUTES}min | Bind=${BIND_HOST}:${INGRESS_PORT}"
-echo "[Config] Claude=$([ -n "${ANTHROPIC_API_KEY}" ] && echo ON || echo MISSING) | Perplexity=$([ -n "${PERPLEXITY_API_KEY}" ] && echo ON || echo OFF)"
+echo "[Config] Claude=$([ -n "${ANTHROPIC_API_KEY}" ] && echo ON || echo MISSING)"
+echo "[Config] Perplexity=$([ -n "${PERPLEXITY_API_KEY}" ] && echo ON || echo OFF)"
+echo "[Config] Proxy vars: unset (accesso diretto a Yahoo Finance)"
 
 exec python3 /app/main.py

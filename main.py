@@ -15,7 +15,7 @@ from ai_validation  import apply_ai_enrichment
 from backtest_engine import backtest_symbol, backtest_batch, BacktestConfig
 from mailer         import send_report
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
 
 
