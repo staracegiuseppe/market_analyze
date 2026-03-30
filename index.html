@@ -919,28 +919,76 @@ function buildOpportunityCard(opp){
 }
 
 async function loadSmartMoney(forceRefresh=false){
-  document.getElementById('sm-loading').style.display='block';
-  document.getElementById('sm-content').style.display='none';
-  document.getElementById('sm-error').style.display='none';
+  const elLoad    = document.getElementById('sm-loading');
+  const elContent = document.getElementById('sm-content');
+  const elError   = document.getElementById('sm-error');
+  elLoad.style.display='block';
+  elContent.style.display='none';
+  elError.style.display='none';
 
   try{
     if(forceRefresh){
+      elLoad.innerHTML='<div style="font-size:14px;margin-bottom:8px">🔄 Avvio analisi istituzionale...</div><div style="font-size:11px;color:#6B7280">Perplexity sta cercando dati 13F e insider buying...<br>Attendi 20-40 secondi</div>';
       await fetch(api('/api/smart-money/refresh'),{method:'POST'});
-      await new Promise(r=>setTimeout(r,3000));
+      // Poll ogni 3s finché i dati arrivano (max 60s)
+      for(let i=0;i<20;i++){
+        await new Promise(r=>setTimeout(r,3000));
+        elLoad.innerHTML='<div style="font-size:14px;margin-bottom:8px">🔄 Analisi in corso... ('+((i+1)*3)+'s)</div><div style="font-size:11px;color:#6B7280">Claude sta elaborando i dati istituzionali...</div>';
+        const check = await fetch(api('/api/smart-money'));
+        if(check.ok){
+          const cd = await check.json();
+          if(!cd.error && cd.opportunities){
+            elLoad.style.display='none';
+            _renderSmartMoney(cd); return;
+          }
+        }
+      }
     }
+
+    // Prima apertura del tab: avvia analisi in background se non c'è ancora nulla
     const r = await fetch(api('/api/smart-money'));
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
 
-    document.getElementById('sm-loading').style.display='none';
-
     if(d.error){
-      document.getElementById('sm-error').style.display='block';
-      document.getElementById('sm-error').textContent='⚠ '+d.error;
+      // Nessun dato → avvia automaticamente l'analisi
+      elLoad.innerHTML='<div style="font-size:14px;margin-bottom:8px">🔄 Prima analisi in corso...</div><div style="font-size:11px;color:#6B7280">Sto raccogliendo dati da 13F, insider trading e flussi istituzionali.<br>Attendi 20-40 secondi — viene eseguita una sola volta ogni 6 ore.</div>';
+      await fetch(api('/api/smart-money/refresh'),{method:'POST'});
+      for(let i=0;i<20;i++){
+        await new Promise(r=>setTimeout(r,3000));
+        const msg=['Ricerca 13F filings...','Analisi insider buying...','Valutazione rotazioni settoriali...','Claude sta elaborando i dati...','Finalizzazione analisi...'];
+        elLoad.innerHTML='<div style="font-size:14px;margin-bottom:8px">🔄 '+msg[Math.min(i,msg.length-1)]+'</div><div style="font-size:11px;color:#6B7280">Analisi in corso ('+(Math.min((i+1)*3,60))+'s)...</div>';
+        const check = await fetch(api('/api/smart-money'));
+        if(check.ok){
+          const cd = await check.json();
+          if(!cd.error && cd.opportunities){
+            elLoad.style.display='none';
+            _renderSmartMoney(cd); return;
+          }
+        }
+      }
+      elLoad.style.display='none';
+      elError.style.display='block';
+      elError.innerHTML='⚠ Analisi non completata — clicca "Aggiorna analisi" per riprovare';
       return;
     }
 
-    const opps = d.opportunities||[];
+    elLoad.style.display='none';
+    _renderSmartMoney(d);
+
+  }catch(e){
+    elLoad.style.display='none';
+    elError.style.display='block';
+    elError.textContent='Errore: '+e.message;
+  }
+}
+
+function _renderSmartMoney(d){
+  const elContent = document.getElementById('sm-content');
+  const elError   = document.getElementById('sm-error');
+
+
+  const opps = d.opportunities||[];
     const summ = d.strategic_summary||{};
     const warn = d.warnings||[];
     const qual = d.data_quality||'?';
@@ -994,6 +1042,8 @@ async function loadSmartMoney(forceRefresh=false){
     document.getElementById('sm-error').style.display='block';
     document.getElementById('sm-error').textContent='Errore: '+e.message;
   }
+}
+
 }
 
 async function refreshSmartMoney(){

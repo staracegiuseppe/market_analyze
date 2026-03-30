@@ -119,6 +119,16 @@ def run_scan():
     state.update({"signals": signals, "tech_data": tech,
                   "last_run": run_ts, "next_run": next_ts, "running": False})
 
+    # Step 3.5: Smart Money (cache interna 6h — non chiama API se recente)
+    if CLAUDE_KEY:
+        try:
+            log.info("[STEP 3.5/4 SMART_MONEY] analisi istituzionale...")
+            sm = run_smart_money_analysis([a["symbol"] for a in ASSETS], CLAUDE_KEY, PPLX_KEY)
+            state["smart_money"] = sm
+            log.info(f"[STEP 3.5/4 SMART_MONEY] {len(sm.get('opportunities',[]))} opp | qualita={sm.get('data_quality','?')}")
+        except Exception as e:
+            log.error(f"[STEP 3.5/4 SMART_MONEY] {e}")
+
     # Step 4: email
     log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
     if OPTIONS.get("email_enabled"):
