@@ -34,6 +34,9 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
     base = {
         "symbol":        sym,
         "name":          asset.get("name", sym),
+        "full_name":     asset.get("full_name", asset.get("name", sym)),
+        "isin":          asset.get("isin", ""),
+        "exchange":      asset.get("exchange", ""),
         "market":        asset.get("market", "?"),
         "asset_type":    asset.get("asset_type", "?"),
         "currency":      asset.get("currency", "?"),
