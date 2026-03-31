@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(n
 log = logging.getLogger("main")
 
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def load_options() -> dict:
     p = Path("/data/options.json")
     if p.exists():
@@ -69,7 +69,7 @@ PORT              = int(os.getenv("INGRESS_PORT","8099"))
 ASSETS = load_assets()
 log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
 
-# Percorso assets.json scrivibile — priorità /app, poi /data
+# Percorso assets.json scrivibile â€” prioritÃ  /app, poi /data
 def _assets_path() -> Path:
     for p in [Path("/app/assets.json"), Path(__file__).parent/"assets.json",
               Path("assets.json"), Path("/data/assets.json")]:
@@ -105,7 +105,7 @@ class AssetModel(BaseModel):
     enabled:    bool = True
     note:       str = ""
 
-# ── State ──────────────────────────────────────────────────────────────────────
+# â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 state = {
     "last_run":    None,
     "next_run":    None,
@@ -122,7 +122,7 @@ state = {
 _backtest_cache: dict = {}  # {symbol: result}
 
 
-# ── Scheduler ──────────────────────────────────────────────────────────────────
+# â”€â”€ Scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def run_scan():
     if state["running"]:
         log.warning("[SCHEDULER] already running, skip")
@@ -139,7 +139,7 @@ def run_scan():
     tech = fetch_all(symbols)
     real_count = sum(1 for v in tech.values() if v is not None)
     log.info(f"[STEP 1/4 MARKET] {real_count}/{len(symbols)} OK | "
-             + " ".join(f"{s}{'✓' if tech.get(s) else '✗'}" for s in symbols[:10]))
+             + " ".join(f"{s}{'âœ“' if tech.get(s) else 'âœ—'}" for s in symbols[:10]))
 
     # Step 2a: Macro layer (FRED + ECB + EIA + Yahoo)
     macro_ctx = None
@@ -170,7 +170,7 @@ def run_scan():
         except Exception as e:
             log.error(f"[STEP 2b/5 FUND] errore: {e}")
     else:
-        log.info("[STEP 2b/5 FUND] Disabilitato — configura fmp_api_key per attivare")
+        log.info("[STEP 2b/5 FUND] Disabilitato â€” configura fmp_api_key per attivare")
 
     # Step 2c: Sector rotation (dati reali ETF settoriali)
     sector_ctx = {}
@@ -201,7 +201,7 @@ def run_scan():
         except Exception as e:
             log.error(f"[STEP 2d/5 INST] errore: {e}")
     elif not FMP_KEY:
-        log.info("[STEP 2d/5 INST] Disabilitato — configura fmp_api_key")
+        log.info("[STEP 2d/5 INST] Disabilitato â€” configura fmp_api_key")
 
     # Step 2e: Technical signals (base layer)
     log.info(f"[STEP 2e/5 QUANT] running signal scanner...")
@@ -228,9 +228,9 @@ def run_scan():
                  f"entry={s['entry']} SL={s['stop_loss']} TP={s['take_profit']} RR=1:{s['risk_reward']}")
 
     # Step 3: AI enrichment (top 3 only)
-    # ── Step 3: AI enrichment — SOLO in finestra 08:00-23:30 ──────────────────
+    # â”€â”€ Step 3: AI enrichment â€” SOLO in finestra 08:00-23:30 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if not is_trading_hours():
-        log.info("[STEP 3/4 AI] SKIPPED — fuori finestra operativa (08:00-23:30) — nessun credito AI consumato")
+        log.info("[STEP 3/4 AI] SKIPPED â€” fuori finestra operativa (08:00-23:30) â€” nessun credito AI consumato")
     elif active and (CLAUDE_KEY or PPLX_KEY):
         log.info(f"[STEP 3/4 AI] enriching top-{min(3,len(active))} signals...")
         signals = apply_ai_enrichment(signals, CLAUDE_KEY, PPLX_KEY)
@@ -244,9 +244,9 @@ def run_scan():
     state.update({"signals": signals, "tech_data": tech,
                   "last_run": run_ts, "next_run": next_ts, "running": False})
 
-    # ── Step 3.5: Smart Money — SOLO in finestra ────────────────────────────────
+    # â”€â”€ Step 3.5: Smart Money â€” SOLO in finestra â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if not is_trading_hours():
-        log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED — fuori finestra operativa")
+        log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED â€” fuori finestra operativa")
     elif CLAUDE_KEY:
         try:
             log.info("[STEP 3.5/4 SMART_MONEY] analisi istituzionale...")
@@ -258,9 +258,9 @@ def run_scan():
 
     # Step 4: email
     log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
-    # ── Step 4: Email — SOLO in finestra ────────────────────────────────────────
+    # â”€â”€ Step 4: Email â€” SOLO in finestra â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if not is_trading_hours():
-        log.info("[STEP 4/4 EMAIL] SKIPPED — fuori finestra operativa (nessuna email notturna)")
+        log.info("[STEP 4/4 EMAIL] SKIPPED â€” fuori finestra operativa (nessuna email notturna)")
     elif OPTIONS.get("email_enabled"):
         try:
             # Adapt signals list for mailer (expects 'results' format)
@@ -278,7 +278,7 @@ def _scheduler_loop():
     """
     Scheduler che rispetta la finestra operativa 08:00-23:30.
     Fuori finestra: nessuna scansione, nessuna chiamata AI, nessuna email.
-    Controlla ogni minuto se è il momento di girare.
+    Controlla ogni minuto se Ã¨ il momento di girare.
     """
     log.info(f"[SCHEDULER] thread avviato | intervallo={SCHEDULER_MINUTES}min | finestra=08:00-23:30")
     last_run_at = None  # timestamp ultimo run completato
@@ -289,7 +289,7 @@ def _scheduler_loop():
         run_scan()
         last_run_at = datetime.utcnow()
     else:
-        log.info("[SCHEDULER] Fuori finestra operativa — prima scansione posticipata alle 08:00")
+        log.info("[SCHEDULER] Fuori finestra operativa â€” prima scansione posticipata alle 08:00")
 
     while True:
         time.sleep(60)  # controlla ogni minuto
@@ -301,7 +301,7 @@ def _scheduler_loop():
         if not is_trading_hours():
             continue
 
-        # Siamo in finestra: controlla se è ora di girare
+        # Siamo in finestra: controlla se Ã¨ ora di girare
         now = datetime.utcnow()
         if last_run_at is None or (now - last_run_at).total_seconds() >= SCHEDULER_MINUTES * 60:
             log.info(f"[SCHEDULER] Avvio scansione (ultima: {last_run_at.strftime('%H:%M') if last_run_at else 'mai'})")
@@ -309,7 +309,7 @@ def _scheduler_loop():
             last_run_at = datetime.utcnow()
 
 
-# ── FastAPI ────────────────────────────────────────────────────────────────────
+# â”€â”€ FastAPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app = FastAPI(title="Multi-Market Scanner", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -327,7 +327,7 @@ async def idx():   return await _html()
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
     """Catch-all: qualsiasi path sconosciuto serve index.html (SPA pattern)."""
-    # Le API restituiscono 404 JSON normale — solo le route non-API servono il frontend
+    # Le API restituiscono 404 JSON normale â€” solo le route non-API servono il frontend
     if request.url.path.startswith("/api/"):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Not Found"}, status_code=404)
@@ -368,14 +368,14 @@ async def add_asset(asset: AssetModel):
     sym = asset.symbol.strip().upper()
     # Verifica duplicati
     if any(a["symbol"].upper() == sym for a in all_assets):
-        raise HTTPException(400, f"Simbolo {sym} già presente in watchlist")
+        raise HTTPException(400, f"Simbolo {sym} giÃ  presente in watchlist")
     new_asset = {**asset.model_dump(), "symbol": sym}
     if not new_asset.get("full_name"):
         new_asset["full_name"] = new_asset["name"]
     all_assets.append(new_asset)
     _save_assets(all_assets)
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
-    log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset['name']})")
+    log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset["name"]})")
     return {"status": "added", "asset": new_asset, "total": len(all_assets)}
 
 @app.put("/api/assets/{symbol}")
@@ -490,7 +490,7 @@ async def get_institutional(symbol: str):
     if sym in inst_db:
         return inst_db[sym]
     if not FMP_KEY:
-        raise HTTPException(400, "FMP API key non configurata — configura fmp_api_key nel config add-on")
+        raise HTTPException(400, "FMP API key non configurata â€” configura fmp_api_key nel config add-on")
     # Fetch puntuale
     asset = next((a for a in ASSETS if a["symbol"].upper() == sym), {"symbol": sym, "asset_type": "stock"})
     from institutional_layer import fetch_institutional_score
@@ -537,7 +537,7 @@ async def get_chart(symbol: str, days: int = 60):
     ind = state.get("tech_data", {}).get(sym)
     if ind is None:
         raise HTTPException(404, f"Nessun dato per {sym}")
-    # Recupera dati OHLCV freschi (già cached da yfinance)
+    # Recupera dati OHLCV freschi (giÃ  cached da yfinance)
     try:
         import yfinance as yf
         df = yf.Ticker(sym).history(period="3mo", interval="1d", auto_adjust=True)

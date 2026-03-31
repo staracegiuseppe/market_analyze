@@ -913,12 +913,12 @@ async function loadAssets(){
         + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px">'+lblTipo(a.asset_type||'')+'</td>'
         + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px;font-family:monospace">'+(a.currency||'')+'</td>'
         + '<td style="padding:9px 12px;text-align:center">'
-        + '<button onclick="toggleAsset(''+a.symbol+'')" style="background:none;border:none;cursor:pointer;font-size:16px" title="'+(enabled?'Disabilita':'Abilita')+'">'
+        + '<button onclick="toggleAsset(&quot;'+a.symbol+'&quot;)" style="background:none;border:none;cursor:pointer;font-size:16px" title="'+(enabled?'Disabilita':'Abilita')+'">'
         + (enabled?'<span style="color:#16A34A">●</span>':'<span style="color:#374151">○</span>')
         + '</button></td>'
         + '<td style="padding:9px 12px;text-align:center;white-space:nowrap">'
-        + '<button onclick="openEditForm(''+a.symbol+'')" style="background:none;border:1px solid #374151;border-radius:4px;color:#9CA3AF;cursor:pointer;padding:3px 8px;font-size:10px;margin-right:4px" title="Modifica">✏</button>'
-        + '<button onclick="openDelDialog(''+a.symbol+'')" style="background:none;border:1px solid #DC262644;border-radius:4px;color:#DC2626;cursor:pointer;padding:3px 8px;font-size:10px" title="Elimina">🗑</button>'
+        + '<button onclick="openEditForm(&quot;'+a.symbol+'&quot;)" style="background:none;border:1px solid #374151;border-radius:4px;color:#9CA3AF;cursor:pointer;padding:3px 8px;font-size:10px;margin-right:4px" title="Modifica">✏</button>'
+        + '<button onclick="openDelDialog(&quot;'+a.symbol+'&quot;)" style="background:none;border:1px solid #DC262644;border-radius:4px;color:#DC2626;cursor:pointer;padding:3px 8px;font-size:10px" title="Elimina">🗑</button>'
         + '</td></tr>';
     }).join('');
   }catch(e){
