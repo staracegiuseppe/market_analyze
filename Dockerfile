@@ -8,6 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY assets.json .
 COPY market_data.py .
 COPY signal_engine.py .
+COPY macro_layer.py .
+COPY fundamental_layer.py .
+COPY scoring_engine.py .
 COPY ai_validation.py .
 COPY backtest_engine.py .
 COPY smart_money.py .
