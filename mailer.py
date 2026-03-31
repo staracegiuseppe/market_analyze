@@ -244,14 +244,13 @@ def _card(r: dict) -> str:
     ind       = r.get("indicators",{})
     bd        = r.get("score_breakdown",{})
     ai_sum    = r.get("ai_summary","")
-    ai_align  = r.get("ai_enriched") and r.get("ai_news_bias","")
     news      = r.get("news",[])
 
     conf_col  = "#16A34A" if conf>=70 else "#F59E0B" if conf>=50 else "#DC2626"
     conf_lbl  = "Alta" if conf>=70 else "Media" if conf>=50 else "Bassa"
     sc_str    = ("+" if score>=0 else "")+str(score)
-    isin_str  = f' · ISIN: {isin}' if isin else ""
-    exch_str  = f' · {exchange}' if exchange else ""
+    isin_str  = " · ISIN: "+isin if isin else ""
+    exch_str  = " · "+exchange if exchange else ""
 
     # Livelli operativi
     livelli = ""
@@ -261,98 +260,88 @@ def _card(r: dict) -> str:
         livelli = (
             '<table style="width:100%;border-collapse:collapse;background:#0A0F1A;border-radius:6px;margin-top:12px">'
             '<tr>'
-            f'<td style="padding:10px 12px;text-align:center;border-right:1px solid #1F2937">'
-            f'<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">PREZZO ENTRATA</div>'
-            f'<div style="font-size:16px;font-weight:700;color:#F9FAFB;font-family:monospace">{curr} {entry}</div>'
-            f'</td>'
-            f'<td style="padding:10px 12px;text-align:center;border-right:1px solid #1F2937">'
-            f'<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">STOP LOSS</div>'
-            f'<div style="font-size:16px;font-weight:700;color:#DC2626;font-family:monospace">{curr} {sl}</div>'
-            f'<div style="font-size:10px;color:#6B7280;margin-top:2px">Rischio: {rischio:.2f}</div>'
-            f'</td>'
-            f'<td style="padding:10px 12px;text-align:center;border-right:1px solid #1F2937">'
-            f'<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">OBIETTIVO</div>'
-            f'<div style="font-size:16px;font-weight:700;color:#16A34A;font-family:monospace">{curr} {tp}</div>'
-            f'<div style="font-size:10px;color:#6B7280;margin-top:2px">Guadagno: {guadagno:.2f}</div>'
-            f'</td>'
-            f'<td style="padding:10px 12px;text-align:center">'
-            f'<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">RISCHIO/RENDIMENTO</div>'
-            f'<div style="font-size:16px;font-weight:700;color:#F59E0B;font-family:monospace">1 : {rr}</div>'
-            f'</td>'
+            '<td style="padding:10px 12px;text-align:center;border-right:1px solid #1F2937">'
+            '<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">PREZZO ENTRATA</div>'
+            '<div style="font-size:16px;font-weight:700;color:#F9FAFB;font-family:monospace">'+curr+" "+str(entry)+'</div>'
+            '</td>'
+            '<td style="padding:10px 12px;text-align:center;border-right:1px solid #1F2937">'
+            '<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">STOP LOSS</div>'
+            '<div style="font-size:16px;font-weight:700;color:#DC2626;font-family:monospace">'+curr+" "+str(sl)+'</div>'
+            '<div style="font-size:10px;color:#6B7280;margin-top:2px">Rischio: '+f"{rischio:.2f}"+'</div>'
+            '</td>'
+            '<td style="padding:10px 12px;text-align:center;border-right:1px solid #1F2937">'
+            '<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">OBIETTIVO</div>'
+            '<div style="font-size:16px;font-weight:700;color:#16A34A;font-family:monospace">'+curr+" "+str(tp)+'</div>'
+            '<div style="font-size:10px;color:#6B7280;margin-top:2px">Guadagno: '+f"{guadagno:.2f}"+'</div>'
+            '</td>'
+            '<td style="padding:10px 12px;text-align:center">'
+            '<div style="font-size:9px;color:#9CA3AF;letter-spacing:.1em;margin-bottom:3px">RISCHIO/RENDIMENTO</div>'
+            '<div style="font-size:16px;font-weight:700;color:#F59E0B;font-family:monospace">1 : '+str(rr)+'</div>'
+            '</td>'
             '</tr></table>'
         )
 
-    # Motivazioni tradotte
     motiv_lbl = "Perché ACQUISTARE" if action=="BUY" else "Perché VENDERE" if action=="SELL" else "Motivi del segnale"
-    motiv_items = "".join(f'<li style="margin-bottom:6px;line-height:1.6">{_tr(r2)}</li>' for r2 in reasons)
+    motiv_items = "".join('<li style="margin-bottom:6px;line-height:1.6">'+_tr(r2)+'</li>' for r2 in reasons)
     motiv = (
-        f'<div style="margin-top:14px">'
-        f'<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">{motiv_lbl}</div>'
-        f'<ul style="margin:0;padding:0 0 0 18px;color:#D1D5DB;font-size:12px">{motiv_items}</ul>'
-        f'</div>'
+        '<div style="margin-top:14px">'
+        '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">'+motiv_lbl+'</div>'
+        '<ul style="margin:0;padding:0 0 0 18px;color:#D1D5DB;font-size:12px">'+motiv_items+'</ul>'
+        '</div>'
     ) if motiv_items else ""
 
-    # AI summary
-    ai_html = ""
-    if ai_sum:
-        ai_html = (
-            f'<div style="margin-top:12px;padding:10px 14px;background:#0A0F1A;border-left:3px solid #2563EB;border-radius:0 4px 4px 0">'
-            f'<div style="font-size:9px;color:#2563EB;letter-spacing:.1em;margin-bottom:4px">ANALISI AI</div>'
-            f'<div style="font-size:11px;color:#9CA3AF;line-height:1.7">{ai_sum}</div>'
-            f'</div>'
-        )
+    ai_html = (
+        '<div style="margin-top:12px;padding:10px 14px;background:#0A0F1A;border-left:3px solid #2563EB;border-radius:0 4px 4px 0">'
+        '<div style="font-size:9px;color:#2563EB;letter-spacing:.1em;margin-bottom:4px">ANALISI AI</div>'
+        '<div style="font-size:11px;color:#9CA3AF;line-height:1.7">'+ai_sum+'</div>'
+        '</div>'
+    ) if ai_sum else ""
 
-    # News
-    news_html = ""
-    if news:
-        items_n = "".join(
-            f'<div style="padding:5px 0;border-bottom:1px solid #1F293722;font-size:11px;color:#9CA3AF">'
-            f'▸ {n.get("headline","")} <span style="color:#374151">— {n.get("source","")}</span></div>'
-            for n in news[:3]
-        )
-        news_html = (
-            f'<div style="margin-top:12px">'
-            f'<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:6px">ULTIME NOTIZIE</div>'
-            f'{items_n}</div>'
-        )
-
-    return (
-        f'<div style="background:#111827;border:1px solid #1F2937;border-left:4px solid {col};'
-        f'border-radius:10px;margin-bottom:20px;overflow:hidden">'
-
-        # Header
-        f'<div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-start;'
-        f'background:{col}0D;border-bottom:1px solid #1F2937">'
-        f'<div>'
-        f'<div style="font-size:20px;font-weight:800;color:{col}">{etiq}</div>'
-        f'<div style="font-size:17px;font-weight:700;color:#F9FAFB;margin-top:4px">{sym}'
-        f'<span style="font-size:12px;font-weight:400;color:#9CA3AF;margin-left:8px">{full_name}</span></div>'
-        f'<div style="font-size:10px;color:#6B7280;margin-top:3px">{mkt_label} · {atype}{isin_str}{exch_str}</div>'
-        f'</div>'
-        f'<div style="text-align:right;flex-shrink:0;margin-left:16px">'
-        f'{f"<div style=\\"font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace\\">{curr} {price}</div>" if price else ""}'
-        f'<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:{col};font-weight:700">{sc_str}/100</span></div>'
-        f'</div></div>'
-
-        # Confidenza
-        f'<div style="padding:8px 18px;background:#0D1420;border-bottom:1px solid #1F2937">'
-        f'<div style="display:flex;justify-content:space-between;margin-bottom:3px">'
-        f'<span style="font-size:10px;color:#6B7280;letter-spacing:.08em">CONFIDENZA SEGNALE</span>'
-        f'<span style="font-size:10px;font-weight:700;color:{conf_col}">{conf}% — {conf_lbl}</span></div>'
-        f'<div style="height:5px;background:#1F2937;border-radius:3px">'
-        f'<div style="height:5px;width:{conf}%;background:{conf_col};border-radius:3px"></div>'
-        f'</div></div>'
-
-        # Body
-        f'<div style="padding:14px 18px">'
-        + livelli + motiv
-        + _score_breakdown_html(bd)
-        + _perf_section(ind, curr)
-        + _ind_section(ind)
-        + ai_html + news_html
-        + f'</div></div>'
+    news_items = "".join(
+        '<div style="padding:5px 0;border-bottom:1px solid #1F293722;font-size:11px;color:#9CA3AF">'
+        '▸ '+n.get("headline","")+'<span style="color:#374151"> — '+n.get("source","")+'</span></div>'
+        for n in news[:3]
     )
+    news_html = (
+        '<div style="margin-top:12px">'
+        '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:6px">ULTIME NOTIZIE</div>'
+        + news_items + '</div>'
+    ) if news_items else ""
 
+    price_html = (
+        '<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+curr+" "+str(price)+'</div>'
+    ) if price else ""
+
+    parts = [
+        '<div style="background:#111827;border:1px solid #1F2937;border-left:4px solid '+col+';border-radius:10px;margin-bottom:20px;overflow:hidden">',
+        '<div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-start;background:'+col+'0D;border-bottom:1px solid #1F2937">',
+        '<div>',
+        '<div style="font-size:20px;font-weight:800;color:'+col+'">'+etiq+'</div>',
+        '<div style="font-size:17px;font-weight:700;color:#F9FAFB;margin-top:4px">'+sym+'<span style="font-size:12px;font-weight:400;color:#9CA3AF;margin-left:8px">'+full_name+'</span></div>',
+        '<div style="font-size:10px;color:#6B7280;margin-top:3px">'+mkt_label+' · '+atype+isin_str+exch_str+'</div>',
+        '</div>',
+        '<div style="text-align:right;flex-shrink:0;margin-left:16px">',
+        price_html,
+        '<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:'+col+';font-weight:700">'+sc_str+'/100</span></div>',
+        '</div></div>',
+        '<div style="padding:8px 18px;background:#0D1420;border-bottom:1px solid #1F2937">',
+        '<div style="display:flex;justify-content:space-between;margin-bottom:3px">',
+        '<span style="font-size:10px;color:#6B7280;letter-spacing:.08em">CONFIDENZA SEGNALE</span>',
+        '<span style="font-size:10px;font-weight:700;color:'+conf_col+'">'+str(conf)+'% — '+conf_lbl+'</span></div>',
+        '<div style="height:5px;background:#1F2937;border-radius:3px">',
+        '<div style="height:5px;width:'+str(conf)+'%;background:'+conf_col+';border-radius:3px"></div>',
+        '</div></div>',
+        '<div style="padding:14px 18px">',
+        livelli,
+        motiv,
+        _score_breakdown_html(bd),
+        _perf_section(ind, curr),
+        _ind_section(ind),
+        ai_html,
+        news_html,
+        '</div></div>',
+    ]
+    return "".join(parts)
 
 def _card_hold(r: dict) -> str:
     sym    = r.get("symbol","?"); nm = r.get("full_name") or r.get("name",sym)
@@ -372,4 +361,130 @@ def _card_hold(r: dict) -> str:
         f'<td style="padding:7px 10px;font-family:monospace;font-size:11px;color:{"#16A34A" if score>=0 else "#DC2626"}">{sc_str}</td>'
         f'<td style="padding:7px 10px;color:#9CA3AF;font-size:11px">{" | ".join(filter(None,[rsi,adx]))}</td>'
         f'<td style="padding:7px 10px;color:#6B7280;font-size:11px;font-family:monospace">{price_str}</td>'
-        f'<td style="padding:7px 10px;color:#6B7280;font-size:10px;max-width:200px">{reason_str}<
+        f'<td style="padding:7px 10px;color:#6B7280;font-size:10px;max-width:200px">{reason_str}</td>'
+        f'</tr>'
+    )
+
+
+# ── Build HTML report ─────────────────────────────────────────────────────────
+def build_html_report(results: List[Dict], run_ts: str, next_ts: str, smart_money_data: Dict = None) -> str:
+    run_dt  = run_ts[:19].replace("T"," ") if run_ts else "---"
+    next_dt = next_ts[:19].replace("T"," ") if next_ts else "---"
+
+    buy_l   = [r for r in results if r.get("action")=="BUY"]
+    sell_l  = [r for r in results if r.get("action")=="SELL"]
+    watch_l = [r for r in results if r.get("action")=="WATCHLIST"]
+    hold_l  = [r for r in results if r.get("action") not in ("BUY","SELL","WATCHLIST")]
+
+    # Riepilogo
+    parts_rie = []
+    if buy_l:   parts_rie.append(f'<span style="color:#16A34A;font-weight:700">🟢 {len(buy_l)} Acquist{"o" if len(buy_l)==1 else "i"}</span>')
+    if sell_l:  parts_rie.append(f'<span style="color:#DC2626;font-weight:700">🔴 {len(sell_l)} Vendit{"a" if len(sell_l)==1 else "e"}</span>')
+    if watch_l: parts_rie.append(f'<span style="color:#2563EB;font-weight:700">🔵 {len(watch_l)} Da osservare</span>')
+    if hold_l:  parts_rie.append(f'<span style="color:#6B7280">⚪ {len(hold_l)} Neutri</span>')
+    riepilogo = " &nbsp;·&nbsp; ".join(parts_rie) or "Nessun segnale attivo"
+
+    def _section(lst, col, icon, label):
+        if not lst: return ""
+        cards = "".join(_card(r) for r in lst)
+        return (
+            f'<div style="margin-bottom:28px">'
+            f'<div style="font-size:13px;font-weight:700;color:{col};padding:8px 14px;'
+            f'background:{col}18;border-left:4px solid {col};border-radius:0 6px 6px 0;margin-bottom:14px">'
+            f'{icon} {label} ({len(lst)})</div>'
+            f'{cards}</div>'
+        )
+
+    hold_rows = "".join(_card_hold(r) for r in hold_l)
+    hold_section = (
+        f'<div style="margin-bottom:20px">'
+        f'<div style="font-size:12px;font-weight:600;color:#6B7280;margin-bottom:8px">⚪ ALTRI ASSET MONITORATI ({len(hold_l)})</div>'
+        f'<div style="overflow-x:auto">'
+        f'<table style="width:100%;min-width:600px;border-collapse:collapse;background:#111827;'
+        f'border:1px solid #1F2937;border-radius:8px;overflow:hidden">'
+        f'<tr style="background:#0D1420">'
+        + "".join(f'<th style="padding:6px 10px;color:#6B7280;font-size:9px;text-align:left;letter-spacing:.1em;font-weight:600">{h}</th>'
+                  for h in ["SIMBOLO","NOME","STATO","SCORE","RSI / ADX","PREZZO","MOTIVO"])
+        + f'</tr>{hold_rows}</table></div></div>'
+    ) if hold_l else ""
+
+    # Smart money section
+    sm_section = ""
+    if smart_money_data and _HAS_SM:
+        sm_section = _sm_section(smart_money_data) or ""
+
+    return (
+        '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"/></head>'
+        '<body style="margin:0;padding:0;background:#0D1117;font-family:\'Segoe UI\',system-ui,sans-serif">'
+        '<div style="max-width:720px;margin:0 auto;padding:20px 14px">'
+
+        # Header
+        '<div style="background:linear-gradient(135deg,#111827,#1F2937);border:1px solid #374151;'
+        'border-radius:12px;padding:24px;margin-bottom:20px;text-align:center">'
+        '<div style="font-size:26px;font-weight:800;color:#F9FAFB">⊕ Market Analyze</div>'
+        '<div style="font-size:12px;color:#6B7280;margin-top:6px">REPORT SEGNALI · DATI REALI · AI VALIDATION</div>'
+        '<div style="margin-top:12px;font-size:11px;color:#9CA3AF">'
+        f'📅 {run_dt} &nbsp;·&nbsp; ⏭ Prossimo: {next_dt} &nbsp;·&nbsp; 📊 {len(results)} asset analizzati</div></div>'
+
+        # Riepilogo
+        '<div style="background:#111827;border:1px solid #1F2937;border-radius:10px;'
+        'padding:14px 20px;margin-bottom:22px;text-align:center">'
+        '<div style="font-size:10px;color:#6B7280;letter-spacing:.1em;margin-bottom:8px">RIEPILOGO</div>'
+        f'<div style="font-size:14px;line-height:2">{riepilogo}</div></div>'
+
+        + _section(buy_l,   "#16A34A", "🟢", "SEGNALI DI ACQUISTO")
+        + _section(sell_l,  "#DC2626", "🔴", "SEGNALI DI VENDITA")
+        + _section(watch_l, "#2563EB", "🔵", "DA OSSERVARE")
+        + hold_section
+        + sm_section
+
+        + '<div style="text-align:center;padding:16px;font-size:10px;color:#374151;'
+        'margin-top:8px;border-top:1px solid #1F2937">'
+        'Market Analyze · Home Assistant Add-on · Non costituisce consulenza finanziaria</div>'
+        '</div></body></html>'
+    )
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict, smart_money_data: Dict = None) -> bool:
+    if not cfg.get("email_enabled"): return False
+    email_to   = cfg.get("email_to","");   email_from = cfg.get("email_from","")
+    if not email_to or not email_from:
+        log.warning("[MAILER] email_to o email_from mancanti"); return False
+
+    min_score = int(cfg.get("email_min_score",40))
+    active    = [r for r in results if r.get("action") in ("BUY","SELL","WATCHLIST")]
+    strong    = [r for r in active if abs(r.get("score",0)) >= min_score]
+    if not strong:
+        log.info(f"[MAILER] Nessun segnale con |score| >= {min_score}"); return False
+
+    html_body = build_html_report(results, run_ts, next_ts, smart_money_data)
+
+    n_buy  = sum(1 for r in active if r.get("action")=="BUY")
+    n_sell = sum(1 for r in active if r.get("action")=="SELL")
+    parts_s = []
+    if n_buy:  parts_s.append(f"{n_buy} ACQUIST{'O' if n_buy==1 else 'I'}")
+    if n_sell: parts_s.append(f"{n_sell} VENDIT{'A' if n_sell==1 else 'E'}")
+    subject = f"📊 Market Analyze — {', '.join(parts_s) or 'Nessun segnale'} — {run_ts[:10] if run_ts else ''}"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject; msg["From"] = email_from; msg["To"] = email_to
+    msg.attach(MIMEText(html_body,"html","utf-8"))
+
+    # OAuth2
+    cid = cfg.get("oauth2_client_id",""); csec = cfg.get("oauth2_client_secret",""); rtok = cfg.get("oauth2_refresh_token","")
+    if cid and csec and rtok:
+        log.info("[MAILER] Invio OAuth2...")
+        if _send_oauth2(msg, email_from, email_to, cid, csec, rtok): return True
+        log.warning("[MAILER] OAuth2 fallito, provo App Password")
+
+    # App Password fallback
+    user = cfg.get("smtp_user",""); pw = cfg.get("smtp_password","")
+    if user and pw:
+        log.info("[MAILER] Invio App Password...")
+        return _send_apppassword(msg, email_from, email_to,
+                                 cfg.get("smtp_host","smtp.gmail.com"),
+                                 int(cfg.get("smtp_port",587)),
+                                 user, pw, bool(cfg.get("smtp_tls",True)))
+
+    log.error("[MAILER] Nessuna credenziale configurata"); return False
