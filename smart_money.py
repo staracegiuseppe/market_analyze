@@ -20,9 +20,11 @@ CACHE_TTL = 6 * 3600  # 6 ore
 
 
 # ── Prompt Claude — hedge fund analyst ───────────────────────────────────────
-CLAUDE_SYSTEM = """You are a senior hedge fund analyst specialized in institutional flow tracking, portfolio replication strategies, and equity research.
-Your task is to analyze current institutional investor behavior and extract actionable investment signals.
-You must be skeptical, analytical, and transparent about data limitations.
+CLAUDE_SYSTEM = """You are a senior macro-aware hedge fund analyst.
+Your mandate: identify high-potential opportunities by synthesizing institutional flows WITH the current global macro regime.
+Core belief: a good stock in a bad macro environment is still a risky trade.
+A mediocre stock with strong macro tailwinds can significantly outperform.
+You must be explicitly macro-first, skeptical, and transparent about data limitations.
 Return ONLY valid JSON with no markdown."""
 
 def _build_claude_prompt(pplx_data: str, watched_symbols: List[str]) -> str:
@@ -34,55 +36,87 @@ Watched assets: {symbols_str}
 Real-time data from institutional sources:
 {pplx_data}
 
-Apply this analysis framework:
+ANALYSIS FRAMEWORK — MACRO-FIRST:
 
-1. SIGNAL DETECTION:
+STEP 1 — MACRO REGIME (from Global Macro Context section above)
+Classify: Rate env (HIKING/CUTTING/HOLD) | Growth (EXPANSION/SLOWDOWN/RECESSION) | Risk (ON/OFF/NEUTRAL)
+State explicitly: which sectors have TAILWIND vs HEADWIND in this regime.
+
+STEP 2 — INSTITUTIONAL SIGNAL DETECTION
    - New positions by top hedge funds / superinvestors
    - Position increases ≥20%
    - Convergence: multiple top investors buying same stock
-   - High conviction signals (large portfolio %)
-   - Insider buying (executives/directors)
+   - Insider buying clusters (especially during market stress)
 
-2. VALIDATION FILTERS:
-   - Fundamentals: revenue growth >5%, healthy margins, sustainable debt
-   - Technical: not in strong downtrend, signs of accumulation
-   - Avoid illiquid micro-caps
+STEP 3 — MACRO × SIGNAL VALIDATION (CRITICAL)
+For each signal: does the macro regime SUPPORT or CONTRADICT it?
+   TAILWIND examples: buying energy during oil supply shock; buying gold during rate cuts
+   HEADWIND examples: buying unprofitable tech during rate hikes; buying EM during USD surge
+   CONTRARIAN (high conviction): insider buying DESPITE macro headwinds
 
-3. SCORING (0-100):
-   - Institutional signal strength: 30%
-   - Fundamental quality: 30%
-   - Technical confirmation: 20%
-   - Risk profile: 20%
+STEP 4 — FUNDAMENTALS FILTER
+   - Revenue growth >5-10% | Healthy margins | Sustainable debt (critical when rates high)
 
-4. RULES:
-   - Prefer fewer high-quality ideas over many weak ones
-   - Be skeptical and analytical
+STEP 5 — SCORING (0-100) — MACRO-WEIGHTED:
+   - Macro alignment (20%): does macro environment favor this asset class?
+   - Institutional signal strength (25%): quality and convergence
+   - Fundamental quality (25%): revenue, margins, balance sheet
+   - Technical confirmation (20%): trend, accumulation
+   - Risk/reward profile (10%)
+
+STEP 6 — DISCOVERY: EMERGING OPPORTUNITIES (from EMERGING OPPORTUNITIES section)
+For each stock found outside the watchlist:
+   a) Verify macro alignment (does current environment favor this sector?)
+   b) Assess institutional signal quality (real accumulation or noise?)
+   c) Flag if it represents a genuine overlooked opportunity
+   d) Add to opportunities list with signal_type=Discovery and is_watchlist=false
+   e) Be MORE skeptical: less data = more uncertainty = default lower scores
+
+HARD RULES:
+   - If macro strongly contradicts the signal: cap score at 55
+   - High rate env: penalize growth/speculative stocks (P/E >40, no profits)
+   - Recession risk HIGH: favor defensives, penalize cyclicals
+   - Geopolitical risk HIGH: favor energy/defense/gold, reduce EM/global trade
+   - Prefer 3-5 high-quality ideas over 10 weak ones
+   - Discovery stocks: cap score at 70 unless evidence is exceptionally strong
    - If data is weak or conflicting, say so explicitly
-   - Do NOT generate hype or speculative narratives
 
 Return ONLY this JSON structure (no markdown):
 {{
   "analysis_date": "{today}",
   "data_quality": "high|medium|low",
+  "macro_regime": {{
+    "rate_environment": "HIKING|CUTTING|HOLD",
+    "growth_outlook": "EXPANSION|SLOWDOWN|RECESSION",
+    "risk_appetite": "RISK-ON|RISK-OFF|NEUTRAL",
+    "key_tail_risks": ["risk1"],
+    "favored_sectors": ["sector1"],
+    "headwind_sectors": ["sector2"]
+  }},
   "opportunities": [
     {{
       "company": "Full Company Name",
       "ticker": "TICKER",
       "sector": "Sector",
-      "signal_type": "New Position|Increase|Convergence|Insider Buy",
-      "key_investors": ["Investor1", "Investor2"],
-      "why_matters": "Max 2 sentences explaining why this signal matters.",
-      "fundamental_snapshot": "P/E, revenue growth, margin summary",
+      "signal_type": "New Position|Increase|Convergence|Insider Buy|Discovery",
+      "is_watchlist": true,
+      "key_investors": ["Investor1"],
+      "macro_alignment": "TAILWIND|NEUTRAL|HEADWIND|CONTRARIAN",
+      "macro_rationale": "One sentence: why macro supports or risks this trade",
+      "why_matters": "Max 2 sentences on institutional signal.",
+      "fundamental_snapshot": "Revenue growth, margin, debt in 10 words",
       "technical_status": "Bullish|Neutral|Weak",
-      "risk_summary": "Main risks in one sentence",
+      "risk_summary": "Main risk in one sentence",
       "score": 75,
       "action": "Monitor|Accumulate|Avoid"
     }}
   ],
   "strategic_summary": {{
-    "trend": "What macro trend is emerging",
-    "sector_insights": "Sector-level observations",
-    "conviction_level": "Overall institutional conviction assessment"
+    "macro_regime_summary": "2 sentences on current macro regime and implications",
+    "trend": "What institutional trend is emerging",
+    "sector_insights": "Sector-level observations given macro environment",
+    "conviction_level": "Overall institutional conviction assessment",
+    "discovery_insight": "Overlooked themes or sectors emerging from discovery signals"
   }},
   "warnings": [
     "13F filings have 45-day delay - data may not reflect current positions",
@@ -140,30 +174,73 @@ def _gather_institutional_data(watched_symbols: List[str], pplx_key: str) -> str
     log.info("[SMART_MONEY] Ricerca dati istituzionali via Perplexity...")
     parts = []
 
-    # Query 1: 13F filings e hedge fund moves
-    q1 = ("Latest 13F filing changes from top hedge funds and superinvestors in the last 45 days. "
-          "Focus on: new positions, significant increases (>20%), high-conviction buys. "
-          "Include fund name, stock, and position size if available. "
-          f"Prioritize stocks in these sectors or among these tickers if relevant: {', '.join(watched_symbols[:15])}")
+    # Query 0: MACRO GLOBALE — fondamentale, eseguita per prima
+    q0 = (
+        "Current global macro environment for investors today (be specific with numbers): "
+        "1) Fed and ECB: last decision, current rate level, next meeting guidance. "
+        "2) Inflation: latest CPI and PCE data vs target. "
+        "3) USD index (DXY): current level and trend. "
+        "4) 10-year US Treasury yield: current level vs 6 months ago. "
+        "5) Geopolitical risks: active conflicts, sanctions, trade wars. "
+        "6) Recession indicators: yield curve shape, PMI manufacturing, unemployment. "
+        "7) Oil price (WTI/Brent) and trend. "
+        "8) VIX level and whether markets are in risk-on or risk-off mode. "
+        "Conclude with: which asset classes have TAILWIND vs HEADWIND in this environment."
+    )
+    r0 = _perplexity_search(q0, pplx_key, 700)
+    if r0:
+        parts.append("=== GLOBAL MACRO CONTEXT ===\n" + r0)
+
+    # Query 1: 13F filings con nota macro
+    q1 = (
+        "Latest 13F filing changes from top hedge funds and superinvestors in the last 45 days. "
+        "Focus on: new positions, significant increases (>20%), high-conviction buys. "
+        "Note if positioning aligns with current macro regime (rate cycle, sector rotation). "
+        "Include fund name, stock, position size, and any stated macro rationale. "
+        f"Priority tickers: {', '.join(watched_symbols[:15])}"
+    )
     r1 = _perplexity_search(q1, pplx_key, 700)
     if r1:
         parts.append("=== 13F FILINGS / HEDGE FUND MOVES ===\n" + r1)
 
-    # Query 2: Insider buying
-    q2 = ("Recent insider buying activity (executive and director purchases) in the last 30 days. "
-          "Focus on significant buys (>$100K), multiple insiders buying same company, or cluster buying. "
-          "Include: company, insider role, amount, and date.")
+    # Query 2: Insider buying con filtro macro
+    q2 = (
+        "Recent insider buying activity in the last 30 days. "
+        "Focus: significant buys (>$100K), cluster buying, purchases during market stress. "
+        "Flag if insiders are buying DESPITE macro headwinds (strong contrarian signal). "
+        "Include: company, insider role, amount, date."
+    )
     r2 = _perplexity_search(q2, pplx_key, 500)
     if r2:
         parts.append("=== INSIDER BUYING ===\n" + r2)
 
-    # Query 3: Rotazioni settoriali
-    q3 = ("Current institutional money flows and sector rotation trends. "
-          "Which sectors are institutions accumulating or reducing? "
-          "Any notable ETF inflow/outflow data or block trade activity?")
+    # Query 3: Rotazioni settoriali guidate da macro
+    q3 = (
+        "Current institutional sector rotation driven by macro factors. "
+        "Which sectors are being accumulated given current rate/inflation/geopolitical environment? "
+        "Focus: defensive vs cyclical rotation, commodities flows, bond market. "
+        "Any notable ETF inflow/outflow or block trade data."
+    )
     r3 = _perplexity_search(q3, pplx_key, 400)
     if r3:
-        parts.append("=== SECTOR FLOWS / ROTATION ===\n" + r3)
+        parts.append("=== SECTOR ROTATION / MACRO FLOWS ===\n" + r3)
+
+    # Query 4: Titoli emergenti FUORI dalla watchlist
+    watched_str = ", ".join(watched_symbols[:20])
+    q4 = (
+        "Identify 3-5 stocks that top institutional investors are quietly accumulating NOW, "
+        "NOT widely covered in mainstream media. "
+        "Focus on: companies with rising institutional ownership but low retail awareness, "
+        "small or mid-cap with strong fundamentals, "
+        "sectors with macro tailwinds currently ignored by retail investors. "
+        "For each provide: company full name, ticker, country/exchange, sector, "
+        "why smart money is interested, approximate current price. "
+        "Explicitly EXCLUDE these already-monitored tickers: " + watched_str + ". "
+        "Be factual and specific. Avoid mega-caps already on every fund radar."
+    )
+    r4 = _perplexity_search(q4, pplx_key, 600)
+    if r4:
+        parts.append("=== EMERGING OPPORTUNITIES (outside watchlist) ===\n" + r4)
 
     result = "\n\n".join(parts) if parts else "No data retrieved from Perplexity."
     log.info(f"[SMART_MONEY] Dati raccolti: {len(result)} chars")
