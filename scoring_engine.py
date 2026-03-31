@@ -31,10 +31,11 @@ RANGES = {
 }
 
 # Soglie segnale
-BUY_THRESHOLD      = 30
-SELL_THRESHOLD     = -30
+BUY_THRESHOLD      = 35   # composite score minimo per segnale BUY
+SELL_THRESHOLD     = -35  # composite score massimo per segnale SELL
 WATCHLIST_BULL_THR = 15
 WATCHLIST_BEAR_THR = -15
+MIN_CONF_FOR_ACTIVE = 50  # confidence minima per BUY/SELL — sotto → WATCHLIST
 
 
 def _normalize_technical(raw_score: int) -> float:
@@ -290,6 +291,15 @@ def composite_signal(
     # ── Confidence ────────────────────────────────────────────────────────────
     macro_quality = "none" if not macro_ctx else ("high" if macro_ctx.get("sources", {}).get("fred") else "medium")
     conf = _confidence(composite_int, agreement_pct, macro_quality)
+
+    # Regola: BUY/SELL con confidenza < MIN_CONF_FOR_ACTIVE sono fuorvianti.
+    # Un segnale con conf bassa significa layer discordanti → degrada a WATCHLIST.
+    if final_action in ("BUY", "SELL") and conf < MIN_CONF_FOR_ACTIVE:
+        log.info(
+            f"[SCORING] {asset.get('symbol','?') if asset else '?'}: "
+            f"{final_action} → WATCHLIST (conf={conf}% < {MIN_CONF_FOR_ACTIVE}% minimo)"
+        )
+        final_action = "WATCHLIST"
 
     # ── Report motivazioni composite ─────────────────────────────────────────
     composite_reasons = []

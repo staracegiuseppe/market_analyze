@@ -154,8 +154,11 @@ def run_scan():
                  f"entry={s['entry']} SL={s['stop_loss']} TP={s['take_profit']} RR=1:{s['risk_reward']}")
 
     # Step 3: AI enrichment (top 3 only)
-    log.info(f"[STEP 3/4 AI] enriching top-{min(3,len(active))} signals...")
-    if active and (CLAUDE_KEY or PPLX_KEY):
+    # ── Step 3: AI enrichment — SOLO in finestra 08:00-23:30 ──────────────────
+    if not is_trading_hours():
+        log.info("[STEP 3/4 AI] SKIPPED — fuori finestra operativa (08:00-23:30) — nessun credito AI consumato")
+    elif active and (CLAUDE_KEY or PPLX_KEY):
+        log.info(f"[STEP 3/4 AI] enriching top-{min(3,len(active))} signals...")
         signals = apply_ai_enrichment(signals, CLAUDE_KEY, PPLX_KEY)
         enriched = sum(1 for s in signals if s.get("ai_enriched"))
         log.info(f"[STEP 3/4 AI] {enriched} signals enriched")
@@ -167,8 +170,10 @@ def run_scan():
     state.update({"signals": signals, "tech_data": tech,
                   "last_run": run_ts, "next_run": next_ts, "running": False})
 
-    # Step 3.5: Smart Money (cache interna 6h — non chiama API se recente)
-    if CLAUDE_KEY:
+    # ── Step 3.5: Smart Money — SOLO in finestra ────────────────────────────────
+    if not is_trading_hours():
+        log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED — fuori finestra operativa")
+    elif CLAUDE_KEY:
         try:
             log.info("[STEP 3.5/4 SMART_MONEY] analisi istituzionale...")
             sm = run_smart_money_analysis([a["symbol"] for a in ASSETS], CLAUDE_KEY, PPLX_KEY)
@@ -179,7 +184,10 @@ def run_scan():
 
     # Step 4: email
     log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
-    if OPTIONS.get("email_enabled"):
+    # ── Step 4: Email — SOLO in finestra ────────────────────────────────────────
+    if not is_trading_hours():
+        log.info("[STEP 4/4 EMAIL] SKIPPED — fuori finestra operativa (nessuna email notturna)")
+    elif OPTIONS.get("email_enabled"):
         try:
             # Adapt signals list for mailer (expects 'results' format)
             ok = send_report(signals, run_ts, next_ts, OPTIONS, state.get('smart_money'))
@@ -193,12 +201,38 @@ def run_scan():
 
 
 def _scheduler_loop():
-    log.info(f"[SCHEDULER] thread started, interval={SCHEDULER_MINUTES}min")
-    run_scan()
+    """
+    Scheduler che rispetta la finestra operativa 08:00-23:30.
+    Fuori finestra: nessuna scansione, nessuna chiamata AI, nessuna email.
+    Controlla ogni minuto se è il momento di girare.
+    """
+    log.info(f"[SCHEDULER] thread avviato | intervallo={SCHEDULER_MINUTES}min | finestra=08:00-23:30")
+    last_run_at = None  # timestamp ultimo run completato
+
+    # Prima scansione solo se siamo dentro la finestra
+    if is_trading_hours():
+        log.info("[SCHEDULER] Prima scansione avviata (siamo in finestra)")
+        run_scan()
+        last_run_at = datetime.utcnow()
+    else:
+        log.info("[SCHEDULER] Fuori finestra operativa — prima scansione posticipata alle 08:00")
+
     while True:
-        time.sleep(SCHEDULER_MINUTES * 60)
-        if SCHEDULER_ENABLED:
+        time.sleep(60)  # controlla ogni minuto
+
+        if not SCHEDULER_ENABLED:
+            continue
+
+        # Blocco fuori finestra: nessuna operazione
+        if not is_trading_hours():
+            continue
+
+        # Siamo in finestra: controlla se è ora di girare
+        now = datetime.utcnow()
+        if last_run_at is None or (now - last_run_at).total_seconds() >= SCHEDULER_MINUTES * 60:
+            log.info(f"[SCHEDULER] Avvio scansione (ultima: {last_run_at.strftime('%H:%M') if last_run_at else 'mai'})")
             run_scan()
+            last_run_at = datetime.utcnow()
 
 
 # ── FastAPI ────────────────────────────────────────────────────────────────────

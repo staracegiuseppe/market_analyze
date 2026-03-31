@@ -6,8 +6,8 @@ from typing   import Dict, List, Optional
 
 log = logging.getLogger("signal_engine")
 
-TRADING_START = dtime(7, 30)
-TRADING_END   = dtime(23, 0)
+TRADING_START = dtime(8, 0)   # Inizio analisi e invio segnali
+TRADING_END   = dtime(23, 30) # Fine analisi e invio segnali
 ACTIONS       = ("BUY", "SELL", "WATCHLIST", "HOLD", "NO_DATA")
 
 
