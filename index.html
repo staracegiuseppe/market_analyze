@@ -194,11 +194,122 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 
 <!-- ═══════════════════ TAB: ASSETS ═══════════════════ -->
 <div class="tc" id="tab-assets">
-  <div style="font-size:13px;font-weight:600;color:#D0DFF8;margin-bottom:12px">Watchlist — 30 asset monitorati</div>
-  <div class="panel">
-    <div class="ph">⊞ assets.json</div>
-    <div id="assets-table" class="pb" style="overflow-x:auto">Caricamento...</div>
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#F9FAFB">◈ Gestione Watchlist</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:2px" id="assets-meta">Caricamento...</div>
+    </div>
+    <button class="btn" style="background:#16A34A;border-color:#16A34A;color:#fff;font-size:12px"
+            onclick="openAddForm()">+ Aggiungi asset</button>
   </div>
+
+  <!-- Form aggiungi/modifica (nascosto di default) -->
+  <div id="asset-form-box" style="display:none;background:#111827;border:1px solid #1F2937;border-radius:10px;padding:18px;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:700;color:#F9FAFB;margin-bottom:14px" id="asset-form-title">Aggiungi nuovo asset</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">SIMBOLO YAHOO *</div>
+        <input id="af-symbol" type="text" placeholder="es. ENI.MI, AAPL, SPY"
+          style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none;font-family:monospace"/>
+        <div style="font-size:9px;color:#6B7280;margin-top:3px">Simbolo esatto come su Yahoo Finance</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">NOME BREVE *</div>
+        <input id="af-name" type="text" placeholder="es. Eni SpA"
+          style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">NOME COMPLETO</div>
+        <input id="af-fullname" type="text" placeholder="es. Eni Società per Azioni"
+          style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ISIN</div>
+        <input id="af-isin" type="text" placeholder="es. IT0003132476"
+          style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:11px;outline:none;font-family:monospace"/>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">MERCATO</div>
+        <select id="af-market" style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none">
+          <option value="IT">🇮🇹 Italia</option>
+          <option value="EU">🇪🇺 Europa</option>
+          <option value="US" selected>🇺🇸 USA</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">TIPO</div>
+        <select id="af-type" style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none">
+          <option value="stock" selected>Azione</option>
+          <option value="etf">ETF</option>
+          <option value="index">Indice</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">VALUTA</div>
+        <select id="af-currency" style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none">
+          <option value="EUR">EUR</option>
+          <option value="USD" selected>USD</option>
+          <option value="GBP">GBP</option>
+          <option value="CHF">CHF</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">BORSA</div>
+        <input id="af-exchange" type="text" placeholder="es. BIT, NASDAQ"
+          style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+      </div>
+    </div>
+    <div style="font-size:9px;color:#6B7280;margin-bottom:12px">
+      ℹ Verifica il simbolo su <a href="https://finance.yahoo.com" target="_blank" style="color:#3D8EF0">finance.yahoo.com</a>
+      prima di aggiungere. Simboli italiani terminano in .MI (es. ENI.MI), tedeschi in .DE, olandesi in .AS.
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn" style="background:#16A34A;border-color:#16A34A;color:#fff" onclick="saveAsset()">💾 Salva</button>
+      <button class="btn" onclick="closeAssetForm()">✕ Annulla</button>
+      <span id="af-msg" style="font-size:11px;display:none"></span>
+    </div>
+  </div>
+
+  <!-- Tabella assets -->
+  <div style="background:#111827;border:1px solid #1F2937;border-radius:10px;overflow:hidden">
+    <table style="width:100%;border-collapse:collapse" id="assets-tbl">
+      <thead>
+        <tr style="background:#0D1420">
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">SIMBOLO</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">NOME</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">ISIN</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">MERCATO</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">TIPO</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">VALUTA</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:center;font-weight:600">ATTIVO</th>
+          <th style="padding:9px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:center;font-weight:600">AZIONI</th>
+        </tr>
+      </thead>
+      <tbody id="assets-body">
+        <tr><td colspan="8" style="padding:30px;text-align:center;color:#6B7280">Caricamento...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Dialog conferma eliminazione -->
+  <div id="del-dialog" style="display:none;position:fixed;inset:0;background:#000000bb;z-index:200;display:none;align-items:center;justify-content:center">
+    <div style="background:#111827;border:1px solid #DC2626;border-radius:10px;padding:24px;max-width:360px;width:90%;margin:auto;margin-top:20vh">
+      <div style="font-size:15px;font-weight:700;color:#F9FAFB;margin-bottom:8px">⚠ Conferma eliminazione</div>
+      <div style="font-size:12px;color:#9CA3AF;margin-bottom:16px">
+        Stai per eliminare <b id="del-sym-label" style="color:#F9FAFB"></b> dalla watchlist.<br>
+        Questa operazione è irreversibile.
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn" style="background:#DC2626;border-color:#DC2626;color:#fff" onclick="confirmDelete()">🗑 Elimina</button>
+        <button class="btn" onclick="closeDelDialog()">Annulla</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ═══════════════════ TAB: BACKTEST ═══════════════════ -->
@@ -690,24 +801,180 @@ async function refreshScanner(){
 }
 
 // ════════════════════════════════════════════════════════════
-//  ASSETS
+//  ASSETS — CRUD
 // ════════════════════════════════════════════════════════════
+let _allAssets   = [];   // tutti gli asset (inclusi disabled)
+let _editSymbol  = null; // simbolo in modifica (null = nuovo)
+let _delSymbol   = null; // simbolo da eliminare
+
 async function loadAssets(){
   try{
     const r = await fetch(api('/api/assets'));
     const d = await r.json();
-    const rows = (d.assets||[]).map(a=>'<tr>'
-      + '<td style="color:#F9FAFB;font-weight:600">'+a.symbol+'</td>'
-      + '<td style="color:#9CA3AF">'+a.name+'</td>'
-      + '<td>'+a.isin+'</td>'
-      + '<td style="color:#6B7280">'+lblMkt(a.market)+'</td>'
-      + '<td style="color:#6B7280">'+lblTipo(a.asset_type)+'</td>'
-      + '<td style="color:#6B7280">'+a.currency+'</td>'
-      + '<td>'+(a.enabled?'<span style="color:#16A34A">✓</span>':'<span style="color:#DC2626">✗</span>')+'</td>'
-      + '</tr>').join('');
-    document.getElementById('assets-table').innerHTML =
-      '<table class="trade-table"><tr><th>Simbolo</th><th>Nome</th><th>ISIN</th><th>Mercato</th><th>Tipo</th><th>Valuta</th><th>Attivo</th></tr>'+rows+'</table>';
-  }catch(e){ document.getElementById('assets-table').textContent = 'Errore: '+e.message; }
+    _allAssets = d.assets || [];
+    const total  = _allAssets.length;
+    const active = _allAssets.filter(a=>a.enabled!==false).length;
+    document.getElementById('assets-meta').textContent =
+      total + ' asset in watchlist · ' + active + ' attivi · ' + (total-active) + ' disabilitati';
+
+    const tbody = document.getElementById('assets-body');
+    if(!_allAssets.length){
+      tbody.innerHTML = '<tr><td colspan="8" style="padding:30px;text-align:center;color:#6B7280">Nessun asset in watchlist</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = _allAssets.map(a=>{
+      const enabled = a.enabled !== false;
+      const rowOp   = enabled ? '' : 'opacity:0.5;';
+      return '<tr style="border-bottom:1px solid #1F2937;'+rowOp+'">'
+        + '<td style="padding:9px 12px;color:#F9FAFB;font-weight:600;font-family:monospace;white-space:nowrap">'+a.symbol+'</td>'
+        + '<td style="padding:9px 12px;max-width:160px">'
+        + '<div style="color:#F9FAFB;font-size:12px">'+a.name+'</div>'
+        + '<div style="color:#6B7280;font-size:10px;margin-top:1px">'+(a.full_name&&a.full_name!==a.name?a.full_name.substring(0,35):'')+'</div>'
+        + '</td>'
+        + '<td style="padding:9px 12px;font-family:monospace;font-size:11px;color:#9CA3AF;white-space:nowrap">'+(a.isin||'—')+'</td>'
+        + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px">'+lblMkt(a.market||'')+'</td>'
+        + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px">'+lblTipo(a.asset_type||'')+'</td>'
+        + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px;font-family:monospace">'+(a.currency||'')+'</td>'
+        + '<td style="padding:9px 12px;text-align:center">'
+        + '<button onclick="toggleAsset(\'+a.symbol+\')" style="background:none;border:none;cursor:pointer;font-size:16px" title="'+(enabled?'Disabilita':'Abilita')+'">'
+        + (enabled?'<span style="color:#16A34A">●</span>':'<span style="color:#374151">○</span>')
+        + '</button></td>'
+        + '<td style="padding:9px 12px;text-align:center;white-space:nowrap">'
+        + '<button onclick="openEditForm(\'+a.symbol+\')" style="background:none;border:1px solid #374151;border-radius:4px;color:#9CA3AF;cursor:pointer;padding:3px 8px;font-size:10px;margin-right:4px" title="Modifica">✏</button>'
+        + '<button onclick="openDelDialog(\'+a.symbol+\')" style="background:none;border:1px solid #DC262644;border-radius:4px;color:#DC2626;cursor:pointer;padding:3px 8px;font-size:10px" title="Elimina">🗑</button>'
+        + '</td></tr>';
+    }).join('');
+  }catch(e){
+    document.getElementById('assets-body').innerHTML =
+      '<tr><td colspan="8" style="padding:20px;text-align:center;color:#DC2626">Errore: '+e.message+'</td></tr>';
+  }
+}
+
+// ── Form aggiungi / modifica ──────────────────────────────────────────────────
+function openAddForm(){
+  _editSymbol = null;
+  document.getElementById('asset-form-title').textContent = 'Aggiungi nuovo asset';
+  document.getElementById('af-symbol').disabled = false;
+  _clearForm();
+  document.getElementById('asset-form-box').style.display = 'block';
+  document.getElementById('af-symbol').focus();
+}
+
+function openEditForm(sym){
+  const a = _allAssets.find(x=>x.symbol===sym);
+  if(!a) return;
+  _editSymbol = sym;
+  document.getElementById('asset-form-title').textContent = 'Modifica asset: ' + sym;
+  document.getElementById('af-symbol').value    = a.symbol || '';
+  document.getElementById('af-symbol').disabled = true; // simbolo non modificabile
+  document.getElementById('af-name').value      = a.name || '';
+  document.getElementById('af-fullname').value  = a.full_name || '';
+  document.getElementById('af-isin').value      = a.isin || '';
+  document.getElementById('af-market').value    = a.market || 'US';
+  document.getElementById('af-type').value      = a.asset_type || 'stock';
+  document.getElementById('af-currency').value  = a.currency || 'USD';
+  document.getElementById('af-exchange').value  = a.exchange || '';
+  document.getElementById('af-msg').style.display = 'none';
+  document.getElementById('asset-form-box').style.display = 'block';
+  document.getElementById('af-name').focus();
+}
+
+function closeAssetForm(){
+  document.getElementById('asset-form-box').style.display = 'none';
+  _editSymbol = null;
+  _clearForm();
+}
+
+function _clearForm(){
+  ['af-symbol','af-name','af-fullname','af-isin','af-exchange'].forEach(id=>{
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('af-market').value   = 'US';
+  document.getElementById('af-type').value     = 'stock';
+  document.getElementById('af-currency').value = 'USD';
+  document.getElementById('af-msg').style.display = 'none';
+}
+
+function _showFormMsg(msg, ok){
+  const el = document.getElementById('af-msg');
+  el.style.display  = 'inline';
+  el.style.color    = ok ? '#16A34A' : '#DC2626';
+  el.textContent    = msg;
+}
+
+async function saveAsset(){
+  const sym = document.getElementById('af-symbol').value.trim().toUpperCase();
+  const name = document.getElementById('af-name').value.trim();
+  if(!sym){ _showFormMsg('Inserisci il simbolo Yahoo Finance', false); return; }
+  if(!name){ _showFormMsg('Inserisci il nome', false); return; }
+
+  const payload = {
+    symbol:     sym,
+    name:       name,
+    full_name:  document.getElementById('af-fullname').value.trim() || name,
+    isin:       document.getElementById('af-isin').value.trim().toUpperCase(),
+    market:     document.getElementById('af-market').value,
+    country:    document.getElementById('af-market').value,
+    asset_type: document.getElementById('af-type').value,
+    currency:   document.getElementById('af-currency').value,
+    exchange:   document.getElementById('af-exchange').value.trim().toUpperCase(),
+    enabled:    true,
+    note:       '',
+  };
+
+  try{
+    let r;
+    if(_editSymbol){
+      r = await fetch(api('/api/assets/'+encodeURIComponent(_editSymbol)), {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+    } else {
+      r = await fetch(api('/api/assets'), {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+    }
+    const d = await r.json();
+    if(!r.ok){ _showFormMsg('Errore: '+(d.detail||d.error||r.status), false); return; }
+
+    _showFormMsg((_editSymbol?'Modificato':'Aggiunto')+': '+sym+' ✓', true);
+    setTimeout(()=>{ closeAssetForm(); loadAssets(); }, 900);
+  }catch(e){ _showFormMsg('Errore di rete: '+e.message, false); }
+}
+
+async function toggleAsset(sym){
+  try{
+    const r = await fetch(api('/api/assets/'+encodeURIComponent(sym)+'/toggle'), {method:'PATCH'});
+    const d = await r.json();
+    if(r.ok) loadAssets();
+    else alert('Errore: '+(d.detail||r.status));
+  }catch(e){ alert('Errore di rete: '+e.message); }
+}
+
+// ── Dialog eliminazione ────────────────────────────────────────────────────────
+function openDelDialog(sym){
+  _delSymbol = sym;
+  document.getElementById('del-sym-label').textContent = sym;
+  const dlg = document.getElementById('del-dialog');
+  dlg.style.display = 'flex';
+}
+function closeDelDialog(){
+  document.getElementById('del-dialog').style.display = 'none';
+  _delSymbol = null;
+}
+async function confirmDelete(){
+  if(!_delSymbol) return;
+  try{
+    const r = await fetch(api('/api/assets/'+encodeURIComponent(_delSymbol)), {method:'DELETE'});
+    const d = await r.json();
+    closeDelDialog();
+    if(r.ok) loadAssets();
+    else alert('Errore: '+(d.detail||r.status));
+  }catch(e){ alert('Errore di rete: '+e.message); closeDelDialog(); }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -989,6 +1256,14 @@ window.refreshScanner= refreshScanner;
 window.runBacktest   = runBacktest;
 window.testEmail     = testEmail;
 window.loadAssets    = loadAssets;
+window.openAddForm   = openAddForm;
+window.openEditForm  = openEditForm;
+window.closeAssetForm= closeAssetForm;
+window.saveAsset     = saveAsset;
+window.toggleAsset   = toggleAsset;
+window.openDelDialog = openDelDialog;
+window.closeDelDialog= closeDelDialog;
+window.confirmDelete = confirmDelete;
 window.loadSettings  = loadSettings;
 window.loadSM        = loadSM;
 window.refreshSM     = refreshSM;

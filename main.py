@@ -2,7 +2,7 @@
 import os, json, logging, threading, time
 from pathlib    import Path
 from datetime   import datetime, timedelta
-from fastapi    import FastAPI, HTTPException, BackgroundTasks
+from fastapi    import FastAPI, HTTPException, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses       import HTMLResponse
 from pydantic   import BaseModel
@@ -66,6 +66,42 @@ PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
 ASSETS = load_assets()
 log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
+
+# Percorso assets.json scrivibile — priorità /app, poi /data
+def _assets_path() -> Path:
+    for p in [Path("/app/assets.json"), Path(__file__).parent/"assets.json",
+              Path("assets.json"), Path("/data/assets.json")]:
+        if p.exists():
+            return p
+    return Path("/app/assets.json")  # fallback scrittura
+
+def _save_assets(assets_list: list) -> None:
+    """Salva la lista completa assets.json (inclusi disabled)."""
+    p = _assets_path()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(assets_list, f, indent=2, ensure_ascii=False)
+    log.info(f"[ASSETS] Salvato {len(assets_list)} asset in {p}")
+
+def _load_all_assets() -> list:
+    """Carica TUTTI gli asset (inclusi disabled) per la gestione CRUD."""
+    p = _assets_path()
+    if p.exists():
+        return json.load(open(p, encoding="utf-8"))
+    return []
+
+# Modello Pydantic per asset
+class AssetModel(BaseModel):
+    symbol:     str
+    name:       str
+    full_name:  str = ""
+    isin:       str = ""
+    market:     str = "US"     # IT | EU | US
+    country:    str = "US"
+    asset_type: str = "stock"  # stock | etf | index
+    currency:   str = "USD"
+    exchange:   str = ""
+    enabled:    bool = True
+    note:       str = ""
 
 # ── State ──────────────────────────────────────────────────────────────────────
 state = {
@@ -281,7 +317,77 @@ async def config():
 
 @app.get("/api/assets")
 async def get_assets():
-    return {"count": len(ASSETS), "assets": ASSETS}
+    """Restituisce tutti gli asset (inclusi disabled) per la gestione watchlist."""
+    all_assets = _load_all_assets()
+    return {"count": len(all_assets), "assets": all_assets,
+            "active": sum(1 for a in all_assets if a.get("enabled",True))}
+
+@app.post("/api/assets")
+async def add_asset(asset: AssetModel):
+    """Aggiunge un nuovo asset alla watchlist."""
+    global ASSETS
+    all_assets = _load_all_assets()
+    sym = asset.symbol.strip().upper()
+    # Verifica duplicati
+    if any(a["symbol"].upper() == sym for a in all_assets):
+        raise HTTPException(400, f"Simbolo {sym} già presente in watchlist")
+    new_asset = {**asset.model_dump(), "symbol": sym}
+    if not new_asset.get("full_name"):
+        new_asset["full_name"] = new_asset["name"]
+    all_assets.append(new_asset)
+    _save_assets(all_assets)
+    ASSETS = [a for a in all_assets if a.get("enabled", True)]
+    log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset["name"]})")
+    return {"status": "added", "asset": new_asset, "total": len(all_assets)}
+
+@app.put("/api/assets/{symbol}")
+async def update_asset(symbol: str, asset: AssetModel):
+    """Modifica un asset esistente (identificato dal simbolo nell'URL)."""
+    global ASSETS
+    all_assets = _load_all_assets()
+    sym = symbol.strip().upper()
+    idx = next((i for i,a in enumerate(all_assets) if a["symbol"].upper()==sym), None)
+    if idx is None:
+        raise HTTPException(404, f"Simbolo {sym} non trovato")
+    updated = {**asset.model_dump(), "symbol": sym}
+    if not updated.get("full_name"):
+        updated["full_name"] = updated["name"]
+    all_assets[idx] = updated
+    _save_assets(all_assets)
+    ASSETS = [a for a in all_assets if a.get("enabled", True)]
+    log.info(f"[ASSETS] Modificato: {sym}")
+    return {"status": "updated", "asset": updated}
+
+@app.patch("/api/assets/{symbol}/toggle")
+async def toggle_asset(symbol: str):
+    """Abilita/disabilita un asset senza eliminarlo."""
+    global ASSETS
+    all_assets = _load_all_assets()
+    sym = symbol.strip().upper()
+    idx = next((i for i,a in enumerate(all_assets) if a["symbol"].upper()==sym), None)
+    if idx is None:
+        raise HTTPException(404, f"Simbolo {sym} non trovato")
+    all_assets[idx]["enabled"] = not all_assets[idx].get("enabled", True)
+    status = "enabled" if all_assets[idx]["enabled"] else "disabled"
+    _save_assets(all_assets)
+    ASSETS = [a for a in all_assets if a.get("enabled", True)]
+    log.info(f"[ASSETS] Toggle {sym}: {status}")
+    return {"status": status, "symbol": sym, "enabled": all_assets[idx]["enabled"]}
+
+@app.delete("/api/assets/{symbol}")
+async def delete_asset(symbol: str):
+    """Elimina definitivamente un asset dalla watchlist."""
+    global ASSETS
+    all_assets = _load_all_assets()
+    sym = symbol.strip().upper()
+    before = len(all_assets)
+    all_assets = [a for a in all_assets if a["symbol"].upper() != sym]
+    if len(all_assets) == before:
+        raise HTTPException(404, f"Simbolo {sym} non trovato")
+    _save_assets(all_assets)
+    ASSETS = [a for a in all_assets if a.get("enabled", True)]
+    log.info(f"[ASSETS] Eliminato: {sym}")
+    return {"status": "deleted", "symbol": sym, "remaining": len(all_assets)}
 
 @app.get("/api/signals")
 async def get_signals(market: Optional[str] = None,
