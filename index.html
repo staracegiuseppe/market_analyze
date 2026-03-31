@@ -160,6 +160,18 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
       <button class="btn" style="font-size:10px;padding:4px 10px" onclick="showTab('settings')">⚙ Config</button>
     </span>
   </div>
+  <!-- Rotazione Settoriale -->
+  <div id="sector-panel" style="background:#111827;border:1px solid #1F2937;border-radius:8px;padding:12px 14px;margin-bottom:12px;display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div>
+        <span style="font-size:11px;font-weight:700;color:#F9FAFB">📊 Rotazione Settoriale</span>
+        <span id="sector-regime-badge" style="margin-left:8px;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:700"></span>
+      </div>
+      <span style="font-size:9px;color:#6B7280" id="sector-ts"></span>
+    </div>
+    <div id="sector-ranking" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+  </div>
+
   <!-- Toolbar -->
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px">
     <div style="font-size:10px;color:#6880A0" id="sig-meta">In attesa della prima scansione...</div>
@@ -367,6 +379,35 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
       <span id="email-res" style="font-size:11px;display:none"></span>
     </div>
   </div>
+  <!-- Sezione API esterne -->
+  <div class="panel" style="max-width:700px">
+    <div class="ph">🔑 API esterne — come configurarle</div>
+    <div class="pb" style="font-size:11px;color:#6880A0;line-height:2.2">
+      <div style="margin-bottom:10px">
+        <b style="color:#F9FAFB">FRED (Macro USA)</b> — Gratuito, no limiti pratici<br>
+        1. Registrati su <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" style="color:#3D8EF0">fred.stlouisfed.org</a><br>
+        2. Copia la key → imposta <code style="color:#C8A020">fred_api_key</code> nel config HA<br>
+        <span style="color:#6B7280">Abilita: Fed Funds, CPI USA, Treasury 2Y/10Y, SOFR</span>
+      </div>
+      <div style="margin-bottom:10px">
+        <b style="color:#F9FAFB">EIA (Energia)</b> — Gratuito<br>
+        1. Registrati su <a href="https://www.eia.gov/opendata/" target="_blank" style="color:#3D8EF0">eia.gov/opendata</a><br>
+        2. Copia la key → imposta <code style="color:#C8A020">eia_api_key</code><br>
+        <span style="color:#6B7280">Abilita: prezzi WTI/Brent, scorte petrolio</span>
+      </div>
+      <div style="margin-bottom:10px">
+        <b style="color:#F9FAFB">FMP — Financial Modeling Prep</b> — $19-29/mese<br>
+        1. Abbonati su <a href="https://financialmodelingprep.com/developer/docs" target="_blank" style="color:#3D8EF0">financialmodelingprep.com</a><br>
+        2. Copia la key → imposta <code style="color:#C8A020">fmp_api_key</code><br>
+        <span style="color:#6B7280">Abilita: 13F filings, insider trading, fundamentals (P/E, revenue growth, FCF)</span>
+      </div>
+      <div style="background:#0A0F1A;border-radius:5px;padding:8px 12px;font-size:10px;color:#6B7280">
+        Senza FMP: analisi a 4 layer (tech + macro + regime + settore)<br>
+        Con FMP: analisi a 6 layer + dati istituzionali 13F + fundamental sanity check
+      </div>
+    </div>
+  </div>
+
   <div class="panel" style="max-width:700px">
     <div class="ph">? Gmail OAuth2 — setup</div>
     <div class="pb" style="font-size:11px;color:#6880A0;line-height:2.2">
@@ -646,7 +687,42 @@ function buildCard(s){
     + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
     + '</div>'
     // Body
-    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+indHtml+aiHtml+newsHtml+'</div>'
+  // Dati istituzionali se disponibili nel segnale
+  const idet  = s.institutional_detail || {};
+  const iscore= s.sub_scores ? (s.sub_scores.institutional||0) : 0;
+  let instHtml = '';
+  if(idet.narrative || idet.signal_13f || iscore !== 0){
+    const iscol = iscore>0?'#16A34A':iscore<0?'#DC2626':'#6B7280';
+    const narr  = idet.narrative || '';
+    const det13f= idet.detail_13f ? 'QoQ: '+(idet.detail_13f.avg_qoq_change||'?')+'%'+
+                  (idet.detail_13f.new_positions?' · Nuove posizioni: '+idet.detail_13f.new_positions:'') : '';
+    const detIns= idet.detail_insider ? 'Insider: net='+(idet.detail_insider.net_ratio||'?')+
+                  ' ('+( idet.detail_insider.buy_persons||0)+' acquirenti, '+(idet.detail_insider.sell_persons||0)+' venditori)' : '';
+    const items = [det13f, detIns].filter(Boolean);
+    instHtml = '<div style="margin-top:12px;padding:10px 14px;background:#0A0F1A;border-left:3px solid '+iscol+';border-radius:0 4px 4px 0">'
+      + '<div style="font-size:9px;color:'+iscol+';letter-spacing:.1em;margin-bottom:4px">POSIZIONAMENTO ISTITUZIONALE</div>'
+      + (narr?'<div style="font-size:11px;color:#D1D5DB;font-weight:600;margin-bottom:4px">'+narr+'</div>':'')
+      + items.map(function(x){ return '<div style="font-size:10px;color:#9CA3AF;margin-top:2px">▸ '+x+'</div>'; }).join('')
+      + '<div style="font-size:9px;color:#374151;margin-top:5px">⚠ Dati 13F con 45 giorni di ritardo</div>'
+      + '</div>';
+  }
+
+  // Rotazione settoriale dal segnale
+  const secDet = s.sector_detail || {};
+  let secHtml = '';
+  if(secDet.narrative && secDet.sector && secDet.sector !== 'Unknown' && secDet.sector !== 'Broad Market'){
+    const scol = (secDet.status==='LEADER'||secDet.status==='IMPROVING')?'#16A34A':
+                 (secDet.status==='LAGGING'||secDet.status==='WEAKENING')?'#DC2626':'#6B7280';
+    secHtml = '<div style="margin-top:8px;padding:8px 12px;background:#0A0F1A;border:1px solid #1F2937;border-radius:5px">'
+      + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:3px">SETTORE: '
+      + secDet.sector+'</div>'
+      + '<div style="font-size:11px;color:'+scol+'">'
+      + (secDet.status||'')+ ' · RS 1M: '+(secDet.rs_1m>=0?'+':'')+secDet.rs_1m+'%'
+      + (secDet.rotation_regime?' · Regime: '+secDet.rotation_regime:'')
+      + '</div></div>';
+  }
+
+    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+indHtml+secHtml+instHtml+aiHtml+newsHtml+'</div>'
     + '</div>';
 }
 
@@ -837,12 +913,12 @@ async function loadAssets(){
         + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px">'+lblTipo(a.asset_type||'')+'</td>'
         + '<td style="padding:9px 12px;color:#9CA3AF;font-size:11px;font-family:monospace">'+(a.currency||'')+'</td>'
         + '<td style="padding:9px 12px;text-align:center">'
-        + '<button onclick="toggleAsset(\'+a.symbol+\')" style="background:none;border:none;cursor:pointer;font-size:16px" title="'+(enabled?'Disabilita':'Abilita')+'">'
+        + '<button onclick="toggleAsset(''+a.symbol+'')" style="background:none;border:none;cursor:pointer;font-size:16px" title="'+(enabled?'Disabilita':'Abilita')+'">'
         + (enabled?'<span style="color:#16A34A">●</span>':'<span style="color:#374151">○</span>')
         + '</button></td>'
         + '<td style="padding:9px 12px;text-align:center;white-space:nowrap">'
-        + '<button onclick="openEditForm(\'+a.symbol+\')" style="background:none;border:1px solid #374151;border-radius:4px;color:#9CA3AF;cursor:pointer;padding:3px 8px;font-size:10px;margin-right:4px" title="Modifica">✏</button>'
-        + '<button onclick="openDelDialog(\'+a.symbol+\')" style="background:none;border:1px solid #DC262644;border-radius:4px;color:#DC2626;cursor:pointer;padding:3px 8px;font-size:10px" title="Elimina">🗑</button>'
+        + '<button onclick="openEditForm(''+a.symbol+'')" style="background:none;border:1px solid #374151;border-radius:4px;color:#9CA3AF;cursor:pointer;padding:3px 8px;font-size:10px;margin-right:4px" title="Modifica">✏</button>'
+        + '<button onclick="openDelDialog(''+a.symbol+'')" style="background:none;border:1px solid #DC262644;border-radius:4px;color:#DC2626;cursor:pointer;padding:3px 8px;font-size:10px" title="Elimina">🗑</button>'
         + '</td></tr>';
     }).join('');
   }catch(e){
@@ -1056,9 +1132,12 @@ async function loadSettings(){
     // Pannello API
     document.getElementById('cfg-api').innerHTML =
       '<div style="font-size:11px;line-height:2.4;color:#6880A0">'
-      + 'Claude: <span style="color:'+(cfg.has_anthropic?'#16A34A':'#DC2626')+'">'+(cfg.has_anthropic?'✓ configurato':'✗ mancante — inserisci anthropic_api_key')+'</span><br>'
-      + 'Perplexity: <span style="color:'+(cfg.has_perplexity?'#A78BFA':'#6B7280')+'">'+(cfg.has_perplexity?'✓ configurato':'○ non configurato (opzionale)')+'</span><br>'
-      + 'Max LLM/run: <b style="color:#D0DFF8">3 segnali</b>'
+      + 'Claude AI: <span style="color:'+(cfg.has_anthropic?'#16A34A':'#DC2626')+'">'+(cfg.has_anthropic?'✓ configurato':'✗ mancante')+'</span><br>'
+      + 'Perplexity: <span style="color:'+(cfg.has_perplexity?'#A78BFA':'#6B7280')+'">'+(cfg.has_perplexity?'✓ configurato':'○ opzionale')+'</span><br>'
+      + 'FMP (13F/Fundamentals): <span style="color:'+(cfg.has_fmp?'#16A34A':'#F59E0B')+'">'+(cfg.has_fmp?'✓ configurato':'○ opzionale — configura fmp_api_key')+'</span><br>'
+      + 'FRED (Macro USA): <span style="color:'+(cfg.has_fred?'#16A34A':'#F59E0B')+'">'+(cfg.has_fred?'✓ configurato':'○ opzionale — configura fred_api_key')+'</span><br>'
+      + 'EIA (Energia): <span style="color:'+(cfg.has_eia?'#16A34A':'#F59E0B')+'">'+(cfg.has_eia?'✓ configurato':'○ opzionale — configura eia_api_key')+'</span><br>'
+      + 'Max LLM/run: <b style="color:#D0DFF8">3 segnali</b> · Layer attivi: <b style="color:#C8A020">'+(cfg.has_fmp?'6':'4')+'/6</b>'
       + '</div>';
 
     document.getElementById('cfg-sched').innerHTML =
@@ -1236,11 +1315,61 @@ async function refreshSM(){
 // ════════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+//  SECTOR ROTATION
+// ════════════════════════════════════════════════════════════
+const SECTOR_STATUS_STYLE = {
+  LEADER:    {bg:'#16A34A18',col:'#16A34A',bdr:'#16A34A44'},
+  IMPROVING: {bg:'#22C55E18',col:'#22C55E',bdr:'#22C55E44'},
+  NEUTRAL:   {bg:'#374151',  col:'#9CA3AF',bdr:'#4B5563'},
+  WEAKENING: {bg:'#F59E0B18',col:'#F59E0B',bdr:'#F59E0B44'},
+  LAGGING:   {bg:'#DC262618',col:'#DC2626',bdr:'#DC262644'},
+};
+
+async function loadSectorRotation(){
+  try{
+    const r = await fetch(api('/api/sector-rotation'));
+    if(!r.ok) return;
+    const d = await r.json();
+    if(!d.available) return;
+
+    const panel = document.getElementById('sector-panel');
+    const rank  = document.getElementById('sector-ranking');
+    const badge = document.getElementById('sector-regime-badge');
+    const ts    = document.getElementById('sector-ts');
+
+    const regime = d.rotation_regime || 'MIXED';
+    const rcol   = regime==='RISK_ON'?'#16A34A':regime==='RISK_OFF'?'#DC2626':'#F59E0B';
+    badge.textContent = regime;
+    badge.style.background = rcol+'18';
+    badge.style.color      = rcol;
+    badge.style.border     = '1px solid '+rcol+'44';
+
+    if(d.timestamp) ts.textContent = 'Aggiornato: '+fmtTime(d.timestamp);
+
+    const ranking = d.ranking_1m || [];
+    rank.innerHTML = ranking.map(function(item){
+      const st = SECTOR_STATUS_STYLE[item.status] || SECTOR_STATUS_STYLE.NEUTRAL;
+      const rs = item.rs_1m >= 0 ? '+'+item.rs_1m : String(item.rs_1m);
+      return '<div style="background:'+st.bg+';border:1px solid '+st.bdr+';border-radius:5px;'
+        + 'padding:4px 9px;font-size:10px">'
+        + '<span style="color:'+st.col+';font-weight:700">'+item.sector+'</span>'
+        + '<span style="color:#6B7280;margin-left:5px">'+(item.status||'')+'</span>'
+        + '<span style="color:'+st.col+';font-family:monospace;margin-left:5px">'+rs+'%</span>'
+        + '</div>';
+    }).join('');
+
+    panel.style.display = 'block';
+  }catch(e){ console.warn('loadSectorRotation:', e); }
+}
+
 async function init(){
   for(let i=0;i<3;i++){
     try{ await loadSettings(); await loadSignals(); break; }
     catch(e){ if(i<2) await new Promise(r=>setTimeout(r,2000)); }
   }
+  // Carica rotazione settoriale in background
+  loadSectorRotation().catch(function(e){ console.warn('sector rotation:', e); });
   const count = allSignals.length;
   document.getElementById('hdr-count').textContent = count+' asset';
   setInterval(loadSignals, 300000);
@@ -1256,6 +1385,7 @@ window.refreshScanner= refreshScanner;
 window.runBacktest   = runBacktest;
 window.testEmail     = testEmail;
 window.loadAssets    = loadAssets;
+window.loadSectorRotation = loadSectorRotation;
 window.openAddForm   = openAddForm;
 window.openEditForm  = openEditForm;
 window.closeAssetForm= closeAssetForm;

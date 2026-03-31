@@ -191,8 +191,12 @@ def composite_signal(
     technical_signal: Dict,
     # Layer macro (da macro_layer)
     macro_ctx: Optional[Dict] = None,
-    # Layer fondamentale+istituzionale (da fundamental_layer)
+    # Layer fondamentale (da fundamental_layer)
     fundamental_data: Optional[Dict] = None,
+    # Layer istituzionale (da institutional_layer) — opzionale
+    institutional_data: Optional[Dict] = None,
+    # Layer rotazione settoriale (da sector_rotation_layer) — opzionale
+    sector_rotation_ctx: Optional[Dict] = None,
     # Metadati asset
     asset: Dict = None,
 ) -> Dict:
@@ -231,11 +235,29 @@ def composite_signal(
         macro_ctx,
     )
 
-    # ── Layer fondamentale + istituzionale ────────────────────────────────────
-    f_score = fundamental_data.get("fundamental_score", 0)   if fundamental_data else 0
-    i_score = fundamental_data.get("institutional_score", 0) if fundamental_data else 0
-    f_detail= fundamental_data.get("fundamental_detail", {}) if fundamental_data else {}
-    i_detail= fundamental_data.get("institutional_detail",{}) if fundamental_data else {}
+    # ── Layer fondamentale ────────────────────────────────────────────────────
+    f_score  = fundamental_data.get("fundamental_score", 0)   if fundamental_data else 0
+    f_detail = fundamental_data.get("fundamental_detail", {}) if fundamental_data else {}
+
+    # ── Layer istituzionale (institutional_layer priorità, fallback fundamental_data) ──
+    if institutional_data:
+        i_score  = institutional_data.get("institutional_score",  0)
+        i_detail = institutional_data.get("institutional_detail", {})
+    else:
+        i_score  = fundamental_data.get("institutional_score", 0)  if fundamental_data else 0
+        i_detail = fundamental_data.get("institutional_detail", {}) if fundamental_data else {}
+
+    # ── Layer rotazione settoriale (sector_rotation_layer) ────────────────────
+    if sector_rotation_ctx and sector_rotation_ctx.get("available"):
+        from sector_rotation_layer import get_sector_score
+        sec_score_rt, sec_detail_rt = get_sector_score(
+            sym, asset.get("asset_type","stock"), sector_rotation_ctx
+        )
+        # Usa sector_rotation se migliore (più dati reali) rispetto al derive interno
+        log.debug(f"[SCORING] {sym}: sector_rotation={sec_score_rt:+d} vs derive={sector_score:+d}")
+        if sec_detail_rt.get("status") not in ("sector_not_classified", "no_rotation_data", None):
+            sector_score  = sec_score_rt
+            sector_detail = sec_detail_rt
 
     # ── Composite score pesato ────────────────────────────────────────────────
     # Scala ogni layer a [-100, +100] prima di pesare
@@ -370,10 +392,12 @@ def composite_signal(
 
 # ── Batch composite scoring ───────────────────────────────────────────────────
 def run_composite_scanner(
-    assets:        List[Dict],
-    technical_sigs:Dict,          # {symbol: signal_dict}
-    macro_ctx:     Optional[Dict],
-    fundamental_db:Optional[Dict],# {symbol: fund_dict}
+    assets:          List[Dict],
+    technical_sigs:  Dict,           # {symbol: signal_dict}
+    macro_ctx:       Optional[Dict],
+    fundamental_db:  Optional[Dict] = None,  # {symbol: fund_dict}
+    institutional_db:Optional[Dict] = None,  # {symbol: inst_dict}
+    sector_rotation: Optional[Dict] = None,  # output fetch_sector_rotation()
 ) -> List[Dict]:
     """
     Applica composite scoring a tutti gli asset.
@@ -383,18 +407,31 @@ def run_composite_scanner(
     for asset in assets:
         sym  = asset["symbol"]
         tech = technical_sigs.get(sym)
-        fund = fundamental_db.get(sym) if fundamental_db else None
+        fund = fundamental_db.get(sym)     if fundamental_db  else None
+        inst = institutional_db.get(sym)   if institutional_db else None
 
         if tech is None:
             # Asset senza dati tecnici
             results.append({
                 "symbol": sym, "name": asset.get("name", sym),
+                "full_name": asset.get("full_name", asset.get("name", sym)),
+                "isin": asset.get("isin",""),
+                "market": asset.get("market","?"),
+                "asset_type": asset.get("asset_type","?"),
+                "currency": asset.get("currency",""),
                 "action": "NO_DATA", "composite_score": 0, "confidence": 0,
                 "has_real_data": False,
             })
             continue
 
-        composite = composite_signal(tech, macro_ctx, fund, asset)
+        composite = composite_signal(
+            technical_signal=tech,
+            macro_ctx=macro_ctx,
+            fundamental_data=fund,
+            institutional_data=inst,
+            sector_rotation_ctx=sector_rotation,
+            asset=asset,
+        )
         results.append(composite)
 
     results.sort(key=lambda s: abs(s.get("composite_score", 0)), reverse=True)

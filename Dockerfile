@@ -14,6 +14,8 @@ COPY scoring_engine.py .
 COPY ai_validation.py .
 COPY backtest_engine.py .
 COPY smart_money.py .
+COPY institutional_layer.py .
+COPY sector_rotation_layer.py .
 COPY mailer.py .
 COPY main.py .
 COPY index.html .

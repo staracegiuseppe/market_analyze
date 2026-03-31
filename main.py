@@ -56,6 +56,8 @@ PPLX_KEY          = os.getenv("PERPLEXITY_API_KEY","")
 FRED_KEY          = os.getenv("FRED_API_KEY","") or OPTIONS.get("fred_api_key","")
 FMP_KEY           = os.getenv("FMP_API_KEY","")  or OPTIONS.get("fmp_api_key","")
 EIA_KEY           = os.getenv("EIA_API_KEY","")  or OPTIONS.get("eia_api_key","")
+INST_ENABLED      = bool(FMP_KEY)   # institutional_layer richiede FMP
+SECTOR_ENABLED    = True             # sector_rotation usa solo Yahoo
 MACRO_ENABLED     = bool(OPTIONS.get("enable_macro_layer", True))
 FUND_ENABLED      = bool(OPTIONS.get("enable_fundamental_layer", False))
 MACRO_UPDATE_H    = int(OPTIONS.get("macro_update_hours", 4))
@@ -170,15 +172,51 @@ def run_scan():
     else:
         log.info("[STEP 2b/5 FUND] Disabilitato — configura fmp_api_key per attivare")
 
-    # Step 2c: Technical signals (base layer)
-    log.info(f"[STEP 2c/5 QUANT] running signal scanner...")
+    # Step 2c: Sector rotation (dati reali ETF settoriali)
+    sector_ctx = {}
+    if SECTOR_ENABLED:
+        try:
+            log.info("[STEP 2c/5 SECTOR] Fetch rotazione settoriale (11 ETF vs SPY)...")
+            sector_ctx = fetch_sector_rotation()
+            state["sector_rotation"] = sector_ctx
+            if sector_ctx.get("available"):
+                leaders  = sector_ctx.get("leaders", [])
+                lagging  = sector_ctx.get("lagging", [])
+                regime   = sector_ctx.get("rotation_regime", "?")
+                log.info(f"[STEP 2c/5 SECTOR] regime={regime} leaders={leaders} lagging={lagging}")
+            else:
+                log.warning("[STEP 2c/5 SECTOR] dati non disponibili")
+        except Exception as e:
+            log.error(f"[STEP 2c/5 SECTOR] errore: {e}")
+
+    # Step 2d: Institutional layer (FMP 13F + insider)
+    inst_db = {}
+    if INST_ENABLED and FMP_KEY and is_trading_hours():
+        try:
+            log.info("[STEP 2d/5 INST] Fetch dati istituzionali FMP (13F + insider)...")
+            inst_db = fetch_all_institutional(ASSETS, FMP_KEY)
+            state["institutional_db"] = inst_db
+            ok_inst = sum(1 for v in inst_db.values() if v.get("institutional_score",0) != 0)
+            log.info(f"[STEP 2d/5 INST] {ok_inst}/{len(inst_db)} asset con dati istituzionali")
+        except Exception as e:
+            log.error(f"[STEP 2d/5 INST] errore: {e}")
+    elif not FMP_KEY:
+        log.info("[STEP 2d/5 INST] Disabilitato — configura fmp_api_key")
+
+    # Step 2e: Technical signals (base layer)
+    log.info(f"[STEP 2e/5 QUANT] running signal scanner...")
     from signal_engine import run_scanner
     tech_signals_raw = {a["symbol"]: __import__("signal_engine").build_quant_signal(
         tech.get(a["symbol"]), a) for a in ASSETS}
 
-    # Step 2d: Composite scoring multi-layer
-    log.info(f"[STEP 2d/5 COMPOSITE] Composite scoring (tech+macro+regime+sector+fund+inst)...")
-    signals = run_composite_scanner(ASSETS, tech_signals_raw, macro_ctx, fund_db if fund_db else None)
+    # Step 2f: Composite scoring multi-layer (6 layer)
+    log.info(f"[STEP 2f/5 COMPOSITE] Composite scoring (tech+macro+regime+sector_rt+inst+fund)...")
+    signals = run_composite_scanner(
+        ASSETS, tech_signals_raw, macro_ctx,
+        fund_db if fund_db else None,
+        inst_db if inst_db else None,
+        sector_ctx if sector_ctx else None,
+    )
     active  = [s for s in signals if s["action"] in ("BUY","SELL","WATCHLIST")]
     log.info(f"[STEP 2/4 QUANT] {len(active)} active signals | "
              f"BUY={sum(1 for s in signals if s['action']=='BUY')} "
@@ -305,7 +343,7 @@ async def health():
 @app.get("/api/config")
 async def config():
     return {"scheduler_minutes":SCHEDULER_MINUTES,"scheduler_enabled":SCHEDULER_ENABLED,
-            "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
+            "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),"has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "has_fred":bool(FRED_KEY),"has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
             "email_enabled":bool(OPTIONS.get("email_enabled")),
@@ -429,6 +467,35 @@ async def get_backtest(symbol: str):
     sym = symbol.upper()
     if sym in _backtest_cache: return _backtest_cache[sym]
     raise HTTPException(404, f"No backtest for {symbol}. POST /api/backtest?symbol={symbol}")
+
+@app.get("/api/sector-rotation")
+async def get_sector_rotation():
+    """Restituisce la rotazione settoriale corrente con ranking e classificazione."""
+    if state.get("sector_rotation"):
+        return state["sector_rotation"]
+    # Fetch sincrono se non ancora disponibile
+    try:
+        from sector_rotation_layer import fetch_sector_rotation
+        result = fetch_sector_rotation()
+        state["sector_rotation"] = result
+        return result
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+@app.get("/api/institutional/{symbol}")
+async def get_institutional(symbol: str):
+    """Restituisce i dati istituzionali per un singolo asset."""
+    sym = symbol.upper()
+    inst_db = state.get("institutional_db", {})
+    if sym in inst_db:
+        return inst_db[sym]
+    if not FMP_KEY:
+        raise HTTPException(400, "FMP API key non configurata — configura fmp_api_key nel config add-on")
+    # Fetch puntuale
+    asset = next((a for a in ASSETS if a["symbol"].upper() == sym), {"symbol": sym, "asset_type": "stock"})
+    from institutional_layer import fetch_institutional_score
+    result = fetch_institutional_score(sym, asset.get("asset_type","stock"), FMP_KEY)
+    return result
 
 @app.get("/api/smart-money")
 async def get_smart_money():
