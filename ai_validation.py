@@ -32,9 +32,28 @@ def _set_cache(sym: str, v: Dict):
     LLM_CACHE[_cache_key(sym)] = {"v": v, "ts": time.time()}
 
 
+# Cache macro context (aggiornato dallo smart_money module ogni 6h)
+_MACRO_CONTEXT: dict = {}
+
+def set_macro_context(ctx: dict):
+    """Chiamato da main.py dopo ogni analisi smart_money."""
+    global _MACRO_CONTEXT
+    _MACRO_CONTEXT = ctx
+
 def _compact_snapshot(sig: Dict) -> str:
-    """Minimal JSON snapshot for LLM — no OHLC, no history."""
+    """Minimal JSON snapshot + macro context for LLM."""
     ind = sig.get("indicators", {})
+    macro = {}
+    if _MACRO_CONTEXT.get("macro_regime"):
+        mr = _MACRO_CONTEXT["macro_regime"]
+        macro = {
+            "rate_env":    mr.get("rate_environment", "HOLD"),
+            "growth":      mr.get("growth_outlook", "?"),
+            "risk_app":    mr.get("risk_appetite", "NEUTRAL"),
+            "tail_risks":  mr.get("key_tail_risks", [])[:2],
+            "favored":     mr.get("favored_sectors", [])[:3],
+            "headwinds":   mr.get("headwind_sectors", [])[:3],
+        }
     return json.dumps({
         "symbol":   sig["symbol"],
         "market":   sig["market"],
@@ -50,24 +69,39 @@ def _compact_snapshot(sig: Dict) -> str:
         "resistance":ind.get("resistance"),
         "atr":      ind.get("atr"),
         "reasons":  sig.get("reasons", [])[:3],
+        "macro":    macro,
     }, separators=(",", ":"))
 
 
 # Short prompt — JSON only, no market education
+# Macro context è aggiunto dinamicamente da _compact_snapshot()
+# Viene iniettato il regime macro globale (tassi, inflazione, geopolitica)
 CLAUDE_PROMPT = (
-    'You are a market signal validator.\n'
-    'Input: compact quantitative snapshot.\n'
-    'Return strict JSON only:\n'
-    '{"summary":"max 40 words","risk_flags":["short"],'
-    '"confidence_adjustment":0,"news_bias":"neutral","action_override":"none"}\n'
-    'Rules: use only provided data. action_override must be "none" unless data strongly contradicts.\n'
-    'Snapshot:\n'
+    'You are a macro-aware quantitative analyst validating a trading signal.\n'
+    'You receive: (1) technical signal snapshot, (2) current global macro context.\n'
+    'Assess if the macro environment SUPPORTS or CONTRADICTS the signal direction.\n\n'
+    'MACRO ADJUSTMENT RULES:\n'
+    '- BUY growth/tech stock + Fed HIKING cycle → confidence -3 to -5\n'
+    '- BUY energy/defense + high geopolitical risk → confidence +3 to +5\n'
+    '- BUY gold/bonds + recession risk rising → confidence +3\n'
+    '- SELL cyclicals + recession signals → confidence +2 to +4\n'
+    '- BUY defensives (healthcare/utilities) + slowdown → confidence +2\n'
+    '- Signal aligned with macro tailwind → macro_alignment=supportive\n'
+    '- Signal against macro headwind → macro_alignment=contradicts\n\n'
+    'confidence_adjustment: integer -5 to +5 ONLY. action_override: always none.\n'
+    'Return ONLY valid JSON:\n'
+    '{"summary":"max 40 words citing macro+technical","risk_flags":["specific risk"],'
+    '"confidence_adjustment":0,"news_bias":"bullish|bearish|neutral",'
+    '"macro_alignment":"supportive|neutral|contradicts","action_override":"none"}\n'
+    'INPUTS:\n'
 )
 
 PPLX_PROMPT = (
-    'Return max 3 recent headlines for SYMBOL. '
-    'Prioritize earnings, guidance, M&A, regulation. Skip commentary. '
-    'JSON only: [{"headline":"...","source":"...","date":"..."}]'
+    'For SYMBOL: find max 3 headlines from last 7 days. '
+    'Prioritize: earnings, guidance, M&A, regulation, macro exposure (rates/USD/oil/sanctions). '
+    'Include macro-relevant events affecting this specific asset or sector. '
+    'Skip generic analyst opinions without hard data. '
+    'JSON only: [{"headline":"...","source":"...","date":"...","macro_relevant":true}]'
 )
 
 
