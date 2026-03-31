@@ -375,7 +375,7 @@ async def add_asset(asset: AssetModel):
     all_assets.append(new_asset)
     _save_assets(all_assets)
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
-    log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset["name"]})")
+    log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset['name']})")
     return {"status": "added", "asset": new_asset, "total": len(all_assets)}
 
 @app.put("/api/assets/{symbol}")
