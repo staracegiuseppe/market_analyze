@@ -258,6 +258,41 @@ async def refresh_smart_money(background_tasks: BackgroundTasks):
     background_tasks.add_task(_run)
     return {"status": "started"}
 
+@app.get("/api/chart/{symbol}")
+async def get_chart(symbol: str, days: int = 60):
+    """Restituisce storico prezzi per grafici frontend."""
+    sym = symbol.upper()
+    ind = state.get("tech_data", {}).get(sym)
+    if ind is None:
+        raise HTTPException(404, f"Nessun dato per {sym}")
+    # Recupera dati OHLCV freschi (già cached da yfinance)
+    try:
+        import yfinance as yf
+        df = yf.Ticker(sym).history(period="3mo", interval="1d", auto_adjust=True)
+        if df is None or len(df) == 0:
+            raise HTTPException(404, "Dati non disponibili")
+        df = df.tail(days)
+        closes = [round(float(v),4) for v in df["Close"].tolist()]
+        volumes= [int(v) for v in df["Volume"].tolist()]
+        dates  = [str(d.date()) for d in df.index.tolist()]
+        # Media mobile 20gg
+        import pandas as pd
+        ma20 = df["Close"].rolling(20).mean().tail(days)
+        ma20_vals = [round(float(v),4) if not pd.isna(v) else None for v in ma20.tolist()]
+        return {
+            "symbol": sym,
+            "dates":  dates,
+            "closes": closes,
+            "volumes":volumes,
+            "ma20":   ma20_vals,
+            "last":   closes[-1] if closes else None,
+            "min":    min(closes) if closes else None,
+            "max":    max(closes) if closes else None,
+        }
+    except HTTPException: raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/email/test")
 async def email_test():
     if not OPTIONS.get("email_enabled"): raise HTTPException(400,"Set email_enabled: true")
