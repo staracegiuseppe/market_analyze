@@ -9,8 +9,11 @@ from pydantic   import BaseModel
 from typing     import Optional, List
 import uvicorn
 
-from market_data    import fetch_all, load_assets
-from smart_money    import run_smart_money_analysis, build_email_section
+from market_data       import fetch_all, load_assets
+from smart_money       import run_smart_money_analysis, build_email_section
+from macro_layer       import fetch_macro_context
+from fundamental_layer import fetch_all_fundamentals
+from scoring_engine    import run_composite_scanner
 from signal_engine  import run_scanner, is_trading_hours
 from ai_validation  import apply_ai_enrichment
 from backtest_engine import backtest_symbol, backtest_batch, BacktestConfig
@@ -50,6 +53,12 @@ if OPTIONS.get("perplexity_api_key"): os.environ["PERPLEXITY_API_KEY"] = OPTIONS
 
 CLAUDE_KEY        = os.getenv("ANTHROPIC_API_KEY","")
 PPLX_KEY          = os.getenv("PERPLEXITY_API_KEY","")
+FRED_KEY          = os.getenv("FRED_API_KEY","") or OPTIONS.get("fred_api_key","")
+FMP_KEY           = os.getenv("FMP_API_KEY","")  or OPTIONS.get("fmp_api_key","")
+EIA_KEY           = os.getenv("EIA_API_KEY","")  or OPTIONS.get("eia_api_key","")
+MACRO_ENABLED     = bool(OPTIONS.get("enable_macro_layer", True))
+FUND_ENABLED      = bool(OPTIONS.get("enable_fundamental_layer", False))
+MACRO_UPDATE_H    = int(OPTIONS.get("macro_update_hours", 4))
 SCHEDULER_MINUTES = int(OPTIONS.get("scheduler_interval_minutes",60))
 SCHEDULER_ENABLED = bool(OPTIONS.get("scheduler_enabled",True))
 BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
@@ -67,7 +76,9 @@ state = {
     "tech_data":   {},
     "email_last":  None,
     "email_ok":    None,
-    "smart_money": None,
+    "smart_money":    None,
+    "macro_context":  None,
+    "fund_data":      {},
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -92,9 +103,46 @@ def run_scan():
     log.info(f"[STEP 1/4 MARKET] {real_count}/{len(symbols)} OK | "
              + " ".join(f"{s}{'✓' if tech.get(s) else '✗'}" for s in symbols[:10]))
 
-    # Step 2: quantitative signals
-    log.info(f"[STEP 2/4 QUANT] running signal scanner...")
-    signals = run_scanner(ASSETS, tech)
+    # Step 2a: Macro layer (FRED + ECB + EIA + Yahoo)
+    macro_ctx = None
+    if MACRO_ENABLED:
+        log.info("[STEP 2a/5 MACRO] Fetch contesto macro (FRED/ECB/EIA)...")
+        try:
+            macro_ctx = fetch_macro_context(
+                fred_key=FRED_KEY, ecb_enabled=True, eia_key=EIA_KEY
+            )
+            state["macro_context"] = macro_ctx
+            log.info(f"[STEP 2a/5 MACRO] score={macro_ctx.get('macro_score',0):+d} "
+                     f"regime={macro_ctx.get('regime')} "
+                     f"VIX={macro_ctx.get('data',{}).get('vix')} "
+                     f"Fed={macro_ctx.get('data',{}).get('fed_funds')} "
+                     f"10Y={macro_ctx.get('data',{}).get('treasury_10y')}")
+        except Exception as e:
+            log.error(f"[STEP 2a/5 MACRO] errore: {e}")
+
+    # Step 2b: Fundamental layer (FMP)
+    fund_db = {}
+    if FUND_ENABLED and FMP_KEY:
+        log.info("[STEP 2b/5 FUND] Fetch fondamentali FMP...")
+        try:
+            fund_db = fetch_all_fundamentals(ASSETS, FMP_KEY)
+            state["fund_data"] = fund_db
+            ok_fund = sum(1 for v in fund_db.values() if v.get("fundamental_score",0) != 0)
+            log.info(f"[STEP 2b/5 FUND] {ok_fund}/{len(fund_db)} asset con dati fondamentali")
+        except Exception as e:
+            log.error(f"[STEP 2b/5 FUND] errore: {e}")
+    else:
+        log.info("[STEP 2b/5 FUND] Disabilitato — configura fmp_api_key per attivare")
+
+    # Step 2c: Technical signals (base layer)
+    log.info(f"[STEP 2c/5 QUANT] running signal scanner...")
+    from signal_engine import run_scanner
+    tech_signals_raw = {a["symbol"]: __import__("signal_engine").build_quant_signal(
+        tech.get(a["symbol"]), a) for a in ASSETS}
+
+    # Step 2d: Composite scoring multi-layer
+    log.info(f"[STEP 2d/5 COMPOSITE] Composite scoring (tech+macro+regime+sector+fund+inst)...")
+    signals = run_composite_scanner(ASSETS, tech_signals_raw, macro_ctx, fund_db if fund_db else None)
     active  = [s for s in signals if s["action"] in ("BUY","SELL","WATCHLIST")]
     log.info(f"[STEP 2/4 QUANT] {len(active)} active signals | "
              f"BUY={sum(1 for s in signals if s['action']=='BUY')} "
@@ -188,6 +236,8 @@ async def health():
 async def config():
     return {"scheduler_minutes":SCHEDULER_MINUTES,"scheduler_enabled":SCHEDULER_ENABLED,
             "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
+            "has_fred":bool(FRED_KEY),"has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),
+            "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
             "email_enabled":bool(OPTIONS.get("email_enabled")),
             "email_to":OPTIONS.get("email_to",""),
             "smtp_host":OPTIONS.get("smtp_host",""),
@@ -257,6 +307,21 @@ async def refresh_smart_money(background_tasks: BackgroundTasks):
         log.info("[SMART_MONEY] Analisi aggiornata via API")
     background_tasks.add_task(_run)
     return {"status": "started"}
+
+@app.get("/api/macro")
+async def get_macro():
+    """Restituisce l'ultimo contesto macro (FRED, ECB, EIA, Yahoo)."""
+    m = state.get("macro_context")
+    if m: return m
+    raise HTTPException(404, "Macro context non ancora disponibile")
+
+@app.get("/api/fundamentals/{symbol}")
+async def get_fundamentals(symbol: str):
+    """Restituisce dati fondamentali FMP per un simbolo."""
+    sym = symbol.upper()
+    fd  = state.get("fund_data", {}).get(sym)
+    if fd: return fd
+    raise HTTPException(404, f"Fondamentali non disponibili per {sym}")
 
 @app.get("/api/chart/{symbol}")
 async def get_chart(symbol: str, days: int = 60):
