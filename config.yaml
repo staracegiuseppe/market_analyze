@@ -26,9 +26,15 @@ auth_api: false
 options:
   anthropic_api_key: ""
   perplexity_api_key: ""
+  fred_api_key: ""
+  fmp_api_key: ""
+  eia_api_key: ""
   score_threshold: 25
   scheduler_interval_minutes: 60
   scheduler_enabled: true
+  enable_macro_layer: true
+  enable_fundamental_layer: false
+  macro_update_hours: 4
   email_enabled: false
   email_to: ""
   email_from: ""
@@ -45,9 +51,15 @@ options:
 schema:
   anthropic_api_key: str
   perplexity_api_key: str
+  fred_api_key: str
+  fmp_api_key: str
+  eia_api_key: str
   score_threshold: int
   scheduler_interval_minutes: int
   scheduler_enabled: bool
+  enable_macro_layer: bool
+  enable_fundamental_layer: bool
+  macro_update_hours: int
   email_enabled: bool
   email_to: str
   email_from: str

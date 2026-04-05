@@ -262,6 +262,116 @@ def _perf(cl):
     return {"1d":p(1),"5d":p(5),"20d":p(20),"60d":p(60)}
 
 
+def _rsi_divergence(cl, p=14, lookback=20):
+    """
+    Detect RSI divergence over last `lookback` bars.
+    Bullish: price makes lower low but RSI makes higher low (hidden strength).
+    Bearish: price makes higher high but RSI makes lower high (hidden weakness).
+    Returns: 'bullish_divergence' | 'bearish_divergence' | 'none'
+    """
+    if len(cl) < lookback + p + 5:
+        return "none"
+    try:
+        d = cl.diff()
+        g = d.clip(lower=0).ewm(com=p-1, min_periods=p).mean()
+        l = (-d.clip(upper=0)).ewm(com=p-1, min_periods=p).mean()
+        rsi_series = 100 - 100 / (1 + g / l.replace(0, np.nan))
+
+        price_win = cl.iloc[-lookback:]
+        rsi_win   = rsi_series.iloc[-lookback:]
+
+        mid = len(price_win) // 2
+        p1, p2 = price_win.iloc[:mid], price_win.iloc[mid:]
+        r1, r2 = rsi_win.iloc[:mid],   rsi_win.iloc[mid:]
+
+        p_lo1, p_lo2 = float(p1.min()), float(p2.min())
+        r_lo1, r_lo2 = float(r1.min()), float(r2.min())
+        p_hi1, p_hi2 = float(p1.max()), float(p2.max())
+        r_hi1, r_hi2 = float(r1.max()), float(r2.max())
+
+        # Bullish div: price lower low + RSI higher low + RSI still below 55
+        if p_lo2 < p_lo1 * 0.99 and r_lo2 > r_lo1 + 2 and r_lo2 < 55:
+            return "bullish_divergence"
+        # Bearish div: price higher high + RSI lower high + RSI above 45
+        if p_hi2 > p_hi1 * 1.01 and r_hi2 < r_hi1 - 2 and r_hi2 > 45:
+            return "bearish_divergence"
+    except Exception:
+        pass
+    return "none"
+
+
+def _bb_squeeze(cl, p=20, lookback=100):
+    """
+    Detect Bollinger Band squeeze: bandwidth at historical low → breakout imminent.
+    Returns dict: squeeze (bool), percentile, breakout direction.
+    """
+    try:
+        mid = cl.rolling(p).mean()
+        std = cl.rolling(p).std()
+        bw  = ((mid + 2*std) - (mid - 2*std)) / mid.replace(0, np.nan) * 100
+        bw_clean = bw.dropna()
+        if len(bw_clean) < 20:
+            return {"squeeze": False, "bw_percentile": 50, "breakout": "none"}
+
+        window = bw_clean.iloc[-min(lookback, len(bw_clean)):]
+        cur    = float(bw_clean.iloc[-1])
+        pct    = round(float((window < cur).mean()) * 100, 1)
+        squeeze = pct < 20
+
+        last   = float(cl.iloc[-1])
+        upper  = float((mid + 2*std).iloc[-1])
+        lower  = float((mid - 2*std).iloc[-1])
+        breakout = "none"
+        if squeeze:
+            if last > upper:   breakout = "bullish_breakout"
+            elif last < lower: breakout = "bearish_breakout"
+
+        return {"squeeze": squeeze, "bw_percentile": pct, "breakout": breakout}
+    except Exception:
+        return {"squeeze": False, "bw_percentile": 50, "breakout": "none"}
+
+
+def _bounce_probability(rsi, bb_pos, vs_ma200, vol_ratio, adx_val):
+    """
+    Estimates bounce probability (0–100%) for oversold conditions.
+    High score = more likely mean-reversion / bounce.
+    Only meaningful on stocks near lows (RSI < 50).
+    """
+    score = 50
+    # RSI: the more oversold, the higher the bounce chance
+    if   rsi < 20: score += 25
+    elif rsi < 25: score += 20
+    elif rsi < 30: score += 15
+    elif rsi < 35: score += 10
+    elif rsi < 40: score +=  5
+    elif rsi > 65: score -= 10
+    elif rsi > 70: score -= 15
+
+    # Bollinger position: near lower band = support zone
+    if   bb_pos < 5:  score += 15
+    elif bb_pos < 15: score += 10
+    elif bb_pos < 25: score +=  5
+    elif bb_pos > 75: score -=  8
+    elif bb_pos > 85: score -= 12
+
+    # Distance from MA200: deeply oversold = reversion more likely
+    if vs_ma200 is not None:
+        if   vs_ma200 < -25: score += 10   # extreme overextension
+        elif vs_ma200 < -15: score +=  5
+        elif vs_ma200 > 20:  score -=  5
+
+    # Volume spike = capitulation → contrarian signal
+    if   vol_ratio > 200: score += 8
+    elif vol_ratio > 150: score += 5
+    elif vol_ratio <  60: score -= 5
+
+    # Strong trend (ADX > 30) = momentum may continue, lower bounce chance
+    if   adx_val > 40: score -= 12
+    elif adx_val > 30: score -=  6
+
+    return max(5, min(95, score))
+
+
 # ── Entry point pubblico ───────────────────────────────────────────────────────
 
 def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
@@ -293,27 +403,45 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
         last = round(float(cl.iloc[-1]), 4)
         prev = round(float(cl.iloc[-2]), 4)
 
+        rsi_val  = _rsi(cl)
+        bb_data  = _bollinger(cl)
+        ma_data  = _ma(cl)
+        adx_data = _adx(hi, lo, cl)
+        vol_data = _volume(vol)
+        squeeze  = _bb_squeeze(cl)
+
+        bounce_prob = _bounce_probability(
+            rsi       = rsi_val,
+            bb_pos    = bb_data.get("position", 50),
+            vs_ma200  = ma_data.get("vs_ma200"),
+            vol_ratio = vol_data.get("ratio_pct", 100),
+            adx_val   = adx_data.get("adx", 0),
+        )
+
         ind = {
-            "symbol":      symbol,
-            "last_price":  last,
-            "prev_close":  prev,
-            "change_pct":  round((last-prev)/prev*100, 2),
-            "last_date":   str(cl.index[-1].date()),
-            "bars":        len(cl),
-            "rsi":         _rsi(cl),
-            "bollinger":   _bollinger(cl),
-            "ma":          _ma(cl),
-            "macd":        _macd(cl),
-            "stochastic":  _stoch(hi, lo, cl),
-            "adx":         _adx(hi, lo, cl),
-            "atr_regime":  _atr_regime(hi, lo, cl),
-            "obv":         _obv(cl, vol),
-            "roc10":       _roc(cl, 10),
-            "donchian20":  _donchian(hi, lo, 20),
-            "support_res": _sr(hi, lo, 20),
-            "volume":      _volume(vol),
-            "performance": _perf(cl),
-            "source":      "yahoo_direct",
+            "symbol":           symbol,
+            "last_price":       last,
+            "prev_close":       prev,
+            "change_pct":       round((last-prev)/prev*100, 2),
+            "last_date":        str(cl.index[-1].date()),
+            "bars":             len(cl),
+            "rsi":              rsi_val,
+            "bollinger":        bb_data,
+            "ma":               ma_data,
+            "macd":             _macd(cl),
+            "stochastic":       _stoch(hi, lo, cl),
+            "adx":              adx_data,
+            "atr_regime":       _atr_regime(hi, lo, cl),
+            "obv":              _obv(cl, vol),
+            "roc10":            _roc(cl, 10),
+            "donchian20":       _donchian(hi, lo, 20),
+            "support_res":      _sr(hi, lo, 20),
+            "volume":           vol_data,
+            "performance":      _perf(cl),
+            "rsi_divergence":   _rsi_divergence(cl),
+            "bb_squeeze_data":  squeeze,
+            "bounce_probability": bounce_prob,
+            "source":           "yahoo_direct",
         }
         log.info(
             f"[MARKET] ✓ {symbol}: price={last} Δ={ind['change_pct']:+.2f}% "

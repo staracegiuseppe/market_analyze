@@ -541,8 +541,13 @@ function lblInd(k, v){
     ma50:       ['Media 50gg',          v, ''],
     ma200:      ['Media 200gg',         v, ''],
     ma_cross:   ['Incrocio medie',      {golden_cross:'Golden Cross ↑',death_cross:'Death Cross ↓',ma20_above_ma50:'MA20 > MA50',ma20_below_ma50:'MA20 < MA50'}[v]||v, ''],
-    atr:        ['ATR (volatilità)',    v, ''],
-    technical_score: ['Score tecnico', v, ''],
+    atr:             ['ATR (volatilità)',      v, ''],
+    technical_score: ['Score tecnico',         v, ''],
+    rsi_divergence:  ['Divergenza RSI',
+                      v==='bullish_divergence'?'Rialzista ↑':v==='bearish_divergence'?'Ribassista ↓':'Nessuna',
+                      v==='bullish_divergence'?'Rimbalzo probabile':v==='bearish_divergence'?'Inversione al ribasso':'' ],
+    bb_squeeze:      ['BB Squeeze',            v?'Attivo ⚡':'No', v?'Breakout imminente':''],
+    bounce_probability: ['Prob. Rimbalzo',     v+'%', v>=65?'Alta':v>=45?'Media':'Bassa'],
   };
   return M[k] || null;
 }
@@ -611,6 +616,10 @@ function buildCard(s){
     ? '<span style="font-size:9px;color:#16A34A">● dati reali</span>'
     : '<span style="font-size:9px;color:#DC2626">● no dati</span>';
   const aiTag = s.ai_enriched ? ' <span style="font-size:9px;color:#2563EB">AI✓</span>' : '';
+  const qual  = safe(s.signal_quality, 0);
+  const qualTag = qual > 0
+    ? ' <span style="font-size:10px;color:#C8A020" title="Qualità segnale '+qual+'/5">'+'★'.repeat(qual)+'☆'.repeat(5-qual)+'</span>'
+    : '';
 
   // Livelli
   let livelliHtml = '';
@@ -641,7 +650,7 @@ function buildCard(s){
       + '</ul></div>' : '';
 
   // Indicatori
-  const IND_KEYS = ['rsi','adx','macd_hist','obv_trend','bb_pos','stoch_k','roc10','vol_signal','atr_regime','support','resistance','ma_cross','ma20','ma50','ma200','atr','technical_score'];
+  const IND_KEYS = ['rsi','adx','macd_hist','obv_trend','bb_pos','stoch_k','roc10','vol_signal','atr_regime','support','resistance','ma_cross','ma20','ma50','ma200','atr','technical_score','rsi_divergence','bb_squeeze','bounce_probability'];
   const indItems = IND_KEYS.filter(k=>ind[k]!=null).map(k=>{
     const x = lblInd(k, ind[k]);
     if(!x) return '';
@@ -664,30 +673,7 @@ function buildCard(s){
 
   const bdHtml = scoreBreakdownHtml(s.score_breakdown);
 
-  return '<div class="sig-card '+s.action.toLowerCase()+'">'
-    // Header
-    + '<div class="sig-card-hdr">'
-    + '<div>'
-    + '<div style="font-size:18px;font-weight:800;color:'+col+'">'+act+actEff+aiTag+'</div>'
-    + '<div style="font-size:16px;font-weight:700;color:#F9FAFB;margin-top:2px">'+s.symbol
-    + ' <span style="font-size:12px;font-weight:400;color:#9CA3AF">'+safe(s.full_name||s.name,'')+'</span></div>'
-    + '<div style="font-size:10px;color:#6B7280;margin-top:3px">'+lblMkt(s.market)+' · '+lblTipo(s.asset_type)+(isin?' · ISIN: '+isin:'')+'</div>'
-    + '<div style="margin-top:5px;display:flex;gap:8px;align-items:center">'+realTag
-    + (compScore!==null?'<span style="font-size:9px;color:#9CA3AF">Composito: <b style="color:'+col+'">'+compScore+'</b></span>':'')
-    + '</div>'+subHtml+'</div>'
-    + '<div style="text-align:right;flex-shrink:0;margin-left:16px">'
-    + (s.price?'<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+curr+' '+s.price+'</div>':'')
-    + '<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:'+col+';font-weight:700">'+techScore+'</span></div>'
-    + '</div></div>'
-    // Conf bar
-    + '<div style="padding:8px 18px;background:#0D1420;border-bottom:1px solid #1F2937">'
-    + '<div style="display:flex;justify-content:space-between;margin-bottom:3px">'
-    + '<span style="font-size:10px;color:#6B7280;letter-spacing:.08em">CONFIDENZA</span>'
-    + '<span style="font-size:10px;font-weight:700;color:'+confCol+'">'+conf+'% — '+confLbl+'</span>'
-    + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
-    + '</div>'
-    // Body
-  // Dati istituzionali se disponibili nel segnale
+  // ── Dati istituzionali (DEVONO essere calcolati PRIMA del return) ─────────
   const idet  = s.institutional_detail || {};
   const iscore= s.sub_scores ? (s.sub_scores.institutional||0) : 0;
   let instHtml = '';
@@ -707,7 +693,7 @@ function buildCard(s){
       + '</div>';
   }
 
-  // Rotazione settoriale dal segnale
+  // ── Rotazione settoriale dal segnale ──────────────────────────────────────
   const secDet = s.sector_detail || {};
   let secHtml = '';
   if(secDet.narrative && secDet.sector && secDet.sector !== 'Unknown' && secDet.sector !== 'Broad Market'){
@@ -722,7 +708,46 @@ function buildCard(s){
       + '</div></div>';
   }
 
-    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+indHtml+secHtml+instHtml+aiHtml+newsHtml+'</div>'
+  // ── Extra: divergenza RSI e BB squeeze ───────────────────────────────────
+  const divType = safe(ind.rsi_divergence, 'none');
+  const bbSqueeze = safe(ind.bb_squeeze, false);
+  const bounceProb = safe(ind.bounce_probability, null);
+  let extraHtml = '';
+  if(divType !== 'none' || bbSqueeze || bounceProb !== null){
+    const divCol = divType==='bullish_divergence'?'#16A34A':divType==='bearish_divergence'?'#DC2626':'#6B7280';
+    const bpCol  = bounceProb>=65?'#16A34A':bounceProb>=45?'#F59E0B':'#DC2626';
+    extraHtml = '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
+      + (divType!=='none'?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:'+divCol+'18;color:'+divCol+';border:1px solid '+divCol+'44">'
+        + (divType==='bullish_divergence'?'📈 Divergenza RSI Rialzista':'📉 Divergenza RSI Ribassista')+'</span>':'')
+      + (bbSqueeze?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:#F59E0B18;color:#F59E0B;border:1px solid #F59E0B44">⚡ BB Squeeze — breakout imminente</span>':'')
+      + (bounceProb!==null?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:'+bpCol+'18;color:'+bpCol+';border:1px solid '+bpCol+'44">🎯 Prob. rimbalzo: '+bounceProb+'%</span>':'')
+      + '</div>';
+  }
+
+  return '<div class="sig-card '+s.action.toLowerCase()+'">'
+    // Header
+    + '<div class="sig-card-hdr">'
+    + '<div>'
+    + '<div style="font-size:18px;font-weight:800;color:'+col+'">'+act+actEff+aiTag+qualTag+'</div>'
+    + '<div style="font-size:16px;font-weight:700;color:#F9FAFB;margin-top:2px">'+s.symbol
+    + ' <span style="font-size:12px;font-weight:400;color:#9CA3AF">'+safe(s.full_name||s.name,'')+'</span></div>'
+    + '<div style="font-size:10px;color:#6B7280;margin-top:3px">'+lblMkt(s.market)+' · '+lblTipo(s.asset_type)+(isin?' · ISIN: '+isin:'')+'</div>'
+    + '<div style="margin-top:5px;display:flex;gap:8px;align-items:center">'+realTag
+    + (compScore!==null?'<span style="font-size:9px;color:#9CA3AF">Composito: <b style="color:'+col+'">'+compScore+'</b></span>':'')
+    + '</div>'+subHtml+'</div>'
+    + '<div style="text-align:right;flex-shrink:0;margin-left:16px">'
+    + (s.price?'<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+curr+' '+s.price+'</div>':'')
+    + '<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:'+col+';font-weight:700">'+techScore+'</span></div>'
+    + '</div></div>'
+    // Conf bar
+    + '<div style="padding:8px 18px;background:#0D1420;border-bottom:1px solid #1F2937">'
+    + '<div style="display:flex;justify-content:space-between;margin-bottom:3px">'
+    + '<span style="font-size:10px;color:#6B7280;letter-spacing:.08em">CONFIDENZA</span>'
+    + '<span style="font-size:10px;font-weight:700;color:'+confCol+'">'+conf+'% — '+confLbl+'</span>'
+    + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
+    + '</div>'
+    // Body
+    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+indHtml+secHtml+instHtml+aiHtml+newsHtml+'</div>'
     + '</div>';
 }
 

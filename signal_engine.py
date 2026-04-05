@@ -73,7 +73,10 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
     sr      = ind["support_res"]
     atr_r   = ind["atr_regime"]
     donch   = ind["donchian20"]
-    roc10   = ind["roc10"]
+    roc10       = ind["roc10"]
+    rsi_div     = ind.get("rsi_divergence", "none")
+    bb_sq_data  = ind.get("bb_squeeze_data", {})
+    bounce_prob = ind.get("bounce_probability", None)
 
     ma20    = _safe(ma, "ma20")
     ma50    = _safe(ma, "ma50")
@@ -192,6 +195,49 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
     else:
         breakdown["roc"] = 0
 
+    # 9. RSI Divergence (max 10pts) — high-conviction reversal signal
+    if rsi_div == "bullish_divergence":
+        bull_score += 10; breakdown["rsi_div"] = +10
+        reasons_b.append("Divergenza RSI rialzista: prezzo fa minimo più basso, RSI fa minimo più alto → momentum nascosto")
+    elif rsi_div == "bearish_divergence":
+        bear_score += 10; breakdown["rsi_div"] = -10
+        reasons_s.append("Divergenza RSI ribassista: prezzo fa massimo più alto, RSI fa massimo più basso → momentum in esaurimento")
+    else:
+        breakdown["rsi_div"] = 0
+
+    # 10. Bollinger Band Squeeze (max 6pts) — breakout confirmation
+    bb_squeeze   = _safe(bb_sq_data, "squeeze", default=False)
+    bb_breakout  = _safe(bb_sq_data, "breakout", default="none")
+    if bb_squeeze and bb_breakout == "bullish_breakout":
+        bull_score += 6; breakdown["bb_squeeze"] = +6
+        reasons_b.append("BB Squeeze con breakout rialzista → espansione volatilità in corso")
+    elif bb_squeeze and bb_breakout == "bearish_breakout":
+        bear_score += 6; breakdown["bb_squeeze"] = -6
+        reasons_s.append("BB Squeeze con breakout ribassista → pressione vendita accelerata")
+    elif bb_squeeze:
+        # Squeeze senza breakout: attenzione, segnale imminente
+        reasons_b.append("BB Squeeze attivo → breakout imminente, direzione da confermare")
+        breakdown["bb_squeeze"] = 0
+    else:
+        breakdown["bb_squeeze"] = 0
+
+    # ── Value Trap Filter — penalizza BUY su titoli in forte downtrend ───────
+    # Un titolo può avere RSI basso MA essere in trend ribassista strutturale.
+    # Condizioni trap: profondamente sotto MA50 + MA200 + ROC60 molto negativo.
+    vs_ma50_val  = _safe(ma, "vs_ma50",  default=0) or 0
+    vs_ma200_val = _safe(ma, "vs_ma200", default=0) or 0
+    perf_60d     = ind.get("performance", {}).get("60d")
+    is_value_trap = (
+        vs_ma50_val  < -20 and
+        vs_ma200_val < -30 and
+        perf_60d is not None and perf_60d < -20
+    )
+    if is_value_trap:
+        bear_score += 8; breakdown["value_trap"] = -8
+        reasons_s.append(f"⚠ Value Trap Filter: sotto MA50 {vs_ma50_val:.1f}% + MA200 {vs_ma200_val:.1f}% + perf60d {perf_60d:.1f}% → downtrend strutturale")
+    else:
+        breakdown["value_trap"] = 0
+
     # ── Net score → action ────────────────────────────────────────────────────
     net     = bull_score - bear_score
     max_pos = bull_score + bear_score if (bull_score + bear_score) > 0 else 1
@@ -244,6 +290,16 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
     else:
         log.info(f"[SIGNAL  ] {sym}: {action} conf={conf}% score={net:+d}")
 
+    # ── Segnale qualità (1–5 stelle) ─────────────────────────────────────────
+    # Basato su: confidence, layer agreement, presenza divergenza, non value trap
+    quality_pts = 0
+    if conf >= 70:             quality_pts += 2
+    elif conf >= 50:           quality_pts += 1
+    if rsi_div != "none":      quality_pts += 1
+    if not is_value_trap:      quality_pts += 1
+    if bb_squeeze and bb_breakout != "none": quality_pts += 1
+    signal_quality = min(5, max(1, quality_pts))
+
     ind_snap = {
         "rsi": rsi, "adx": adx_val, "macd_hist": hist,
         "bb_pos": bb_pos, "bb_bw": bb_bw,
@@ -252,22 +308,30 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
         "support": sup, "resistance": res,
         "atr": atr_val, "atr_regime": _safe(atr_r, "regime"),
         "ma_cross": cross, "ma20": ma20, "ma50": ma50, "ma200": ma200,
+        "rsi_divergence":    rsi_div,
+        "bb_squeeze":        bb_squeeze,
+        "bounce_probability": bounce_prob,
     }
 
     return {**base,
-        "action":         action,
-        "confidence":     conf,
-        "score":          net,
-        "score_breakdown":breakdown,
-        "reasons":        reasons[:5],
-        "price":          price,
-        "indicators":     ind_snap,
-        "entry":          entry,
-        "stop_loss":      sl,
-        "take_profit":    tp,
-        "risk_reward":    rr,
-        "has_real_data":  True,
-        "action_effective": action if is_trading_hours() else f"HOLD (market closed)",
+        "action":            action,
+        "confidence":        conf,
+        "score":             net,
+        "score_breakdown":   breakdown,
+        "reasons":           reasons[:5],
+        "price":             price,
+        "indicators":        ind_snap,
+        "entry":             entry,
+        "stop_loss":         sl,
+        "take_profit":       tp,
+        "risk_reward":       rr,
+        "has_real_data":     True,
+        "signal_quality":    signal_quality,
+        "rsi_divergence":    rsi_div,
+        "bb_squeeze":        bb_squeeze,
+        "bounce_probability": bounce_prob,
+        "value_trap_flag":   is_value_trap,
+        "action_effective":  action if is_trading_hours() else "HOLD (market closed)",
     }
 
 

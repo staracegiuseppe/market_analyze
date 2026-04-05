@@ -9,15 +9,17 @@ from pydantic   import BaseModel
 from typing     import Optional, List
 import uvicorn
 
-from market_data       import fetch_all, load_assets
-from smart_money       import run_smart_money_analysis, build_email_section
-from macro_layer       import fetch_macro_context
-from fundamental_layer import fetch_all_fundamentals
-from scoring_engine    import run_composite_scanner
-from signal_engine  import run_scanner, is_trading_hours
-from ai_validation  import apply_ai_enrichment
-from backtest_engine import backtest_symbol, backtest_batch, BacktestConfig
-from mailer         import send_report
+from market_data            import fetch_all, load_assets
+from smart_money            import run_smart_money_analysis, build_email_section
+from macro_layer            import fetch_macro_context
+from fundamental_layer      import fetch_all_fundamentals
+from scoring_engine         import run_composite_scanner
+from signal_engine          import run_scanner, build_quant_signal, is_trading_hours
+from ai_validation          import apply_ai_enrichment
+from backtest_engine        import backtest_symbol, backtest_batch, BacktestConfig
+from mailer                 import send_report
+from sector_rotation_layer  import fetch_sector_rotation, get_sector_score
+from institutional_layer    import fetch_institutional_score, fetch_all_institutional
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -205,9 +207,7 @@ def run_scan():
 
     # Step 2e: Technical signals (base layer)
     log.info(f"[STEP 2e/5 QUANT] running signal scanner...")
-    from signal_engine import run_scanner
-    tech_signals_raw = {a["symbol"]: __import__("signal_engine").build_quant_signal(
-        tech.get(a["symbol"]), a) for a in ASSETS}
+    tech_signals_raw = {a["symbol"]: build_quant_signal(tech.get(a["symbol"]), a) for a in ASSETS}
 
     # Step 2f: Composite scoring multi-layer (6 layer)
     log.info(f"[STEP 2f/5 COMPOSITE] Composite scoring (tech+macro+regime+sector_rt+inst+fund)...")
@@ -343,8 +343,8 @@ async def health():
 @app.get("/api/config")
 async def config():
     return {"scheduler_minutes":SCHEDULER_MINUTES,"scheduler_enabled":SCHEDULER_ENABLED,
-            "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),"has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
-            "has_fred":bool(FRED_KEY),"has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),
+            "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
+            "has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
             "email_enabled":bool(OPTIONS.get("email_enabled")),
             "email_to":OPTIONS.get("email_to",""),
