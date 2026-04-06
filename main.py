@@ -9,7 +9,7 @@ from pydantic   import BaseModel
 from typing     import Optional, List
 import uvicorn
 
-from market_data            import fetch_all, load_assets, lookup_isin
+from market_data            import fetch_all, load_assets, lookup_isin, _save_assets, assets_json_path
 from smart_money            import run_smart_money_analysis, build_email_section
 from macro_layer            import fetch_macro_context
 from fundamental_layer      import fetch_all_fundamentals
@@ -69,28 +69,13 @@ BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
 PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
 ASSETS = load_assets()
-log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
-
-# Percorso assets.json scrivibile â€” prioritÃ  /app, poi /data
-def _assets_path() -> Path:
-    for p in [Path("/app/assets.json"), Path(__file__).parent/"assets.json",
-              Path("assets.json"), Path("/data/assets.json")]:
-        if p.exists():
-            return p
-    return Path("/app/assets.json")  # fallback scrittura
-
-def _save_assets(assets_list: list) -> None:
-    """Salva la lista completa assets.json (inclusi disabled)."""
-    p = _assets_path()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(assets_list, f, indent=2, ensure_ascii=False)
-    log.info(f"[ASSETS] Salvato {len(assets_list)} asset in {p}")
+log.info(f”[STARTUP] {len(ASSETS)} assets loaded”)
 
 def _load_all_assets() -> list:
-    """Carica TUTTI gli asset (inclusi disabled) per la gestione CRUD."""
-    p = _assets_path()
+    “””Carica TUTTI gli asset (inclusi disabled) per la gestione CRUD.”””
+    p = assets_json_path()
     if p.exists():
-        return json.load(open(p, encoding="utf-8"))
+        return json.load(open(p, encoding=”utf-8”))
     return []
 
 # Modello Pydantic per asset

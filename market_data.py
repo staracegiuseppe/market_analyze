@@ -680,21 +680,34 @@ def lookup_isin(isin: str) -> Optional[Dict]:
     return result
 
 
-def _assets_path() -> Path:
-    """Ritorna il percorso di assets.json, coerente con main.py."""
-    for p in [Path("/app/assets.json"), Path(__file__).parent / "assets.json",
-              Path("assets.json"), Path("/data/assets.json")]:
+# ── Percorso condiviso assets.json (UNICA fonte di verità) ─────────────────
+
+def assets_json_path() -> Path:
+    """Restituisce il path di assets.json. Stessa logica per lettura e scrittura."""
+    # Docker: /data è la directory persistente montata
+    for p in [Path("/data/assets.json"), Path("/app/assets.json")]:
         if p.exists():
             return p
-    return Path("/app/assets.json")  # fallback scrittura
+    # Se nessun file esiste, default a /data (persistente in Docker)
+    return Path("/data/assets.json")
 
 
-def load_assets(path: str = "assets.json") -> List[Dict]:
-    p = _assets_path()
+def _save_assets(assets_list: list) -> None:
+    """Salva la lista completa assets.json nel path condiviso."""
+    p = assets_json_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(assets_list, f, indent=2, ensure_ascii=False)
+    log.info(f"[ASSETS] Salvato {len(assets_list)} asset in {p}")
+
+
+def load_assets(path: str = None) -> List[Dict]:
+    """Carica gli asset abilitati dal path condiviso."""
+    p = assets_json_path()
     if p.exists():
         assets = json.load(open(p))
         enabled = [a for a in assets if a.get("enabled", True)]
         log.info(f"[MARKET] Caricati {len(enabled)} asset da {p}")
         return enabled
-    log.error(f"[MARKET] assets.json non trovato in: {p}")
+    log.warning(f"[MARKET] {p} non trovato, ritorno lista vuota")
     return []
