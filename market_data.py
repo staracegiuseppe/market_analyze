@@ -680,18 +680,21 @@ def lookup_isin(isin: str) -> Optional[Dict]:
     return result
 
 
-def load_assets(path: str = "assets.json") -> List[Dict]:
-    candidates = [
-        Path(path),
-        Path(__file__).parent / path,
-        Path("/app") / path,
-        Path("/data") / path,
-    ]
-    for p in candidates:
+def _assets_path() -> Path:
+    """Ritorna il percorso di assets.json, coerente con main.py."""
+    for p in [Path("/app/assets.json"), Path(__file__).parent / "assets.json",
+              Path("assets.json"), Path("/data/assets.json")]:
         if p.exists():
-            assets  = json.load(open(p))
-            enabled = [a for a in assets if a.get("enabled", True)]
-            log.info(f"[MARKET] Caricati {len(enabled)} asset da {p}")
-            return enabled
-    log.error(f"[MARKET] assets.json non trovato in: {[str(c) for c in candidates]}")
+            return p
+    return Path("/app/assets.json")  # fallback scrittura
+
+
+def load_assets(path: str = "assets.json") -> List[Dict]:
+    p = _assets_path()
+    if p.exists():
+        assets = json.load(open(p))
+        enabled = [a for a in assets if a.get("enabled", True)]
+        log.info(f"[MARKET] Caricati {len(enabled)} asset da {p}")
+        return enabled
+    log.error(f"[MARKET] assets.json non trovato in: {p}")
     return []
