@@ -25,13 +25,32 @@ Your mandate: identify high-potential opportunities by synthesizing institutiona
 Core belief: a good stock in a bad macro environment is still a risky trade.
 A mediocre stock with strong macro tailwinds can significantly outperform.
 You must be explicitly macro-first, skeptical, and transparent about data limitations.
-Return ONLY valid JSON with no markdown."""
+Return ONLY valid JSON with no markdown.
+
+LANGUAGE REQUIREMENT — MANDATORY:
+Write ALL descriptive text in ITALIAN. This includes:
+  why_matters, macro_rationale, fundamental_snapshot, risk_summary,
+  strategic_summary.macro_regime_summary, strategic_summary.trend,
+  strategic_summary.sector_insights, strategic_summary.conviction_level,
+  strategic_summary.discovery_insight, all warnings[], all key_tail_risks[].
+Keep these fields in English (they are code/enum values):
+  signal_type ("New Position"|"Increase"|"Convergence"|"Insider Buy"|"Discovery"),
+  action ("Monitor"|"Accumulate"|"Avoid"),
+  macro_alignment ("TAILWIND"|"NEUTRAL"|"HEADWIND"|"CONTRARIAN"),
+  technical_status ("Bullish"|"Neutral"|"Weak"),
+  rate_environment ("HIKING"|"CUTTING"|"HOLD"),
+  growth_outlook ("EXPANSION"|"SLOWDOWN"|"RECESSION"),
+  risk_appetite ("RISK-ON"|"RISK-OFF"|"NEUTRAL"),
+  data_quality ("high"|"medium"|"low"),
+  company (nome ufficiale dell'azienda), ticker, sector, favored_sectors[], headwind_sectors[]."""
 
 def _build_claude_prompt(pplx_data: str, watched_symbols: List[str]) -> str:
     today = datetime.now().strftime("%d %B %Y")
     symbols_str = ", ".join(watched_symbols[:20])
     return f"""Date: {today}
 Watched assets: {symbols_str}
+
+REMINDER: All descriptive text fields MUST be in ITALIAN. Keep enum/code values in English.
 
 Real-time data from institutional sources:
 {pplx_data}
@@ -64,13 +83,17 @@ STEP 5 — SCORING (0-100) — MACRO-WEIGHTED:
    - Technical confirmation (20%): trend, accumulation
    - Risk/reward profile (10%)
 
-STEP 6 — DISCOVERY: EMERGING OPPORTUNITIES (from EMERGING OPPORTUNITIES section)
-For each stock found outside the watchlist:
-   a) Verify macro alignment (does current environment favor this sector?)
-   b) Assess institutional signal quality (real accumulation or noise?)
-   c) Flag if it represents a genuine overlooked opportunity
+STEP 6 — DISCOVERY: SCOPERTE AD ALTO POTENZIALE (from SCOPERTE section)
+For each stock/ETF found outside the watchlist with high profit potential:
+   a) Verify macro alignment (does current environment strongly favor this sector?)
+   b) Assess institutional accumulation quality (real data or noise?)
+   c) Verify fundamentals: margin >15%, revenue growth >10%, reasonable valuation
    d) Add to opportunities list with signal_type=Discovery and is_watchlist=false
-   e) Be MORE skeptical: less data = more uncertainty = default lower scores
+   e) WHY_MATTERS must explain in Italian: why big money is buying, what the upside thesis is
+   f) FUNDAMENTAL_SNAPSHOT must include in Italian: margin %, revenue growth, P/E or EV/EBITDA
+   g) Include ETFs if strong sector inflows are documented
+   h) Score honestly: 60-80 for solid evidence, >80 only for exceptional convergence of signals
+   i) Be specific — no vague claims, only data-backed statements
 
 HARD RULES:
    - If macro strongly contradicts the signal: cap score at 55
@@ -225,22 +248,28 @@ def _gather_institutional_data(watched_symbols: List[str], pplx_key: str) -> str
     if r3:
         parts.append("=== SECTOR ROTATION / MACRO FLOWS ===\n" + r3)
 
-    # Query 4: Titoli emergenti FUORI dalla watchlist
+    # Query 4: Scoperte ad alto potenziale FUORI dalla watchlist
     watched_str = ", ".join(watched_symbols[:20])
     q4 = (
-        "Identify 3-5 stocks that top institutional investors are quietly accumulating NOW, "
-        "NOT widely covered in mainstream media. "
-        "Focus on: companies with rising institutional ownership but low retail awareness, "
-        "small or mid-cap with strong fundamentals, "
-        "sectors with macro tailwinds currently ignored by retail investors. "
-        "For each provide: company full name, ticker, country/exchange, sector, "
-        "why smart money is interested, approximate current price. "
+        "Identify 5-7 stocks, ETFs or instruments that top institutional investors and hedge funds "
+        "are quietly accumulating NOW with high profit potential. "
+        "Priority criteria (all must be verified with data): "
+        "1) Rising institutional ownership in last 2 quarters (13F data). "
+        "2) Revenue growth >10% YoY or strong free cash flow yield. "
+        "3) Operating margin >15% or rapidly expanding. "
+        "4) Undervalued vs sector peers (P/E or EV/EBITDA below median). "
+        "5) Macro tailwind alignment (energy transition, defense, AI infrastructure, reshoring). "
+        "6) Low retail coverage — not yet mainstream. "
+        "Include: ETFs with strong inflows and sector tailwinds too. "
+        "For EACH provide: company/fund full name, ticker WITH exchange suffix, country, sector, "
+        "approximate current price, P/E or EV/EBITDA, revenue growth %, "
+        "why smart money is quietly building position, potential upside reason. "
         "Explicitly EXCLUDE these already-monitored tickers: " + watched_str + ". "
-        "Be factual and specific. Avoid mega-caps already on every fund radar."
+        "Be very specific with data. NO speculation without supporting evidence."
     )
-    r4 = _perplexity_search(q4, pplx_key, 600)
+    r4 = _perplexity_search(q4, pplx_key, 800)
     if r4:
-        parts.append("=== EMERGING OPPORTUNITIES (outside watchlist) ===\n" + r4)
+        parts.append("=== SCOPERTE AD ALTO POTENZIALE (outside watchlist) ===\n" + r4)
 
     result = "\n\n".join(parts) if parts else "No data retrieved from Perplexity."
     log.info(f"[SMART_MONEY] Dati raccolti: {len(result)} chars")
