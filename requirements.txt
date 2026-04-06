@@ -8,3 +8,4 @@ numpy==1.26.4
 google-auth==2.29.0
 anthropic>=0.25.0
 python-multipart==0.0.9
+PyMySQL==1.1.1

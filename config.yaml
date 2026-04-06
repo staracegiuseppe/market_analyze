@@ -47,6 +47,11 @@ options:
   smtp_password: ""
   smtp_tls: true
   email_min_score: 40
+  db_host: "core-mariadb"
+  db_port: 3306
+  db_user: "market_analyze"
+  db_password: "antrace82"
+  db_name: "market_analyze"
 
 schema:
   anthropic_api_key: str
@@ -72,3 +77,8 @@ schema:
   smtp_password: str
   smtp_tls: bool
   email_min_score: int
+  db_host: str
+  db_port: int
+  db_user: str
+  db_password: str
+  db_name: str

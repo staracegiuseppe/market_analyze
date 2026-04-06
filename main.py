@@ -1,4 +1,4 @@
-# main.py v2.0 - Multi-Market Scanner
+# main.py v2.1 - Multi-Market Scanner + MariaDB
 import os, json, logging, threading, time
 from pathlib    import Path
 from datetime   import datetime, timedelta
@@ -20,6 +20,7 @@ from backtest_engine        import backtest_symbol, backtest_batch, BacktestConf
 from mailer                 import send_report
 from sector_rotation_layer  import fetch_sector_rotation, get_sector_score
 from institutional_layer    import fetch_institutional_score, fetch_all_institutional
+import db
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -53,6 +54,15 @@ OPTIONS = load_options()
 if OPTIONS.get("anthropic_api_key"):  os.environ["ANTHROPIC_API_KEY"]  = OPTIONS["anthropic_api_key"]
 if OPTIONS.get("perplexity_api_key"): os.environ["PERPLEXITY_API_KEY"] = OPTIONS["perplexity_api_key"]
 
+# ── MariaDB init ──────────────────────────────────────────────────────────────
+DB_ENABLED = db.init_db(
+    host     = OPTIONS.get("db_host", ""),
+    port     = int(OPTIONS.get("db_port", 3306)),
+    user     = OPTIONS.get("db_user", ""),
+    password = OPTIONS.get("db_password", ""),
+    database = OPTIONS.get("db_name", "market_analyze"),
+)
+
 CLAUDE_KEY        = os.getenv("ANTHROPIC_API_KEY","")
 PPLX_KEY          = os.getenv("PERPLEXITY_API_KEY","")
 FRED_KEY          = os.getenv("FRED_API_KEY","") or OPTIONS.get("fred_api_key","")
@@ -71,8 +81,17 @@ PORT              = int(os.getenv("INGRESS_PORT","8099"))
 ASSETS = load_assets()
 log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
 
+# Migra asset da JSON a DB alla prima avvio (solo se tabella vuota)
+if DB_ENABLED:
+    _json_path = assets_json_path()
+    _json_assets = json.load(open(_json_path, encoding="utf-8")) if _json_path.exists() else []
+    db.migrate_assets_from_json(_json_assets)
+
+
 def _load_all_assets() -> list:
-    """Carica TUTTI gli asset (inclusi disabled) per la gestione CRUD."""
+    """Carica TUTTI gli asset (inclusi disabled). DB se disponibile, altrimenti JSON."""
+    if db.is_enabled():
+        return db.load_assets_from_db()
     p = assets_json_path()
     if p.exists():
         return json.load(open(p, encoding="utf-8"))
@@ -229,6 +248,13 @@ def run_scan():
     state.update({"signals": signals, "tech_data": tech,
                   "last_run": run_ts, "next_run": next_ts, "running": False})
 
+    # Persistenza su MariaDB
+    if db.is_enabled():
+        try:
+            db.save_analysis_run(signals, state.get("macro_context"))
+        except Exception as e:
+            log.error(f"[DB] save_analysis_run: {e}")
+
     # â"€â"€ Step 3.5: Smart Money - SOLO in finestra â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if not is_trading_hours():
         log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED - fuori finestra operativa")
@@ -242,6 +268,11 @@ def run_scan():
             if n_opp and state.get("signals"):
                 state["signals"] = enrich_with_smart_money(state["signals"], sm)
                 log.info(f"[STEP 3.5/4 SMART_MONEY] Segnali asset arricchiti con overlay Smart Money")
+            if db.is_enabled() and not sm.get("error"):
+                try:
+                    db.save_smart_money(sm)
+                except Exception as _e:
+                    log.error(f"[DB] save_smart_money: {_e}")
         except Exception as e:
             log.error(f"[STEP 3.5/4 SMART_MONEY] {e}")
 
@@ -355,14 +386,17 @@ async def add_asset(asset: AssetModel):
     global ASSETS
     all_assets = _load_all_assets()
     sym = asset.symbol.strip().upper()
-    # Verifica duplicati
     if any(a["symbol"].upper() == sym for a in all_assets):
-        raise HTTPException(400, f"Simbolo {sym} giÃ  presente in watchlist")
+        raise HTTPException(400, f"Simbolo {sym} già presente in watchlist")
     new_asset = {**asset.model_dump(), "symbol": sym}
     if not new_asset.get("full_name"):
         new_asset["full_name"] = new_asset["name"]
-    all_assets.append(new_asset)
-    _save_assets(all_assets)
+    if db.is_enabled():
+        db.save_asset_to_db(new_asset)
+    else:
+        all_assets.append(new_asset)
+        _save_assets(all_assets)
+    all_assets = _load_all_assets()
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
     log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset['name']})")
     return {"status": "added", "asset": new_asset, "total": len(all_assets)}
@@ -379,8 +413,12 @@ async def update_asset(symbol: str, asset: AssetModel):
     updated = {**asset.model_dump(), "symbol": sym}
     if not updated.get("full_name"):
         updated["full_name"] = updated["name"]
-    all_assets[idx] = updated
-    _save_assets(all_assets)
+    if db.is_enabled():
+        db.save_asset_to_db(updated)
+    else:
+        all_assets[idx] = updated
+        _save_assets(all_assets)
+    all_assets = _load_all_assets()
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
     log.info(f"[ASSETS] Modificato: {sym}")
     return {"status": "updated", "asset": updated}
@@ -389,8 +427,17 @@ async def update_asset(symbol: str, asset: AssetModel):
 async def toggle_asset(symbol: str):
     """Abilita/disabilita un asset senza eliminarlo."""
     global ASSETS
-    all_assets = _load_all_assets()
     sym = symbol.strip().upper()
+    if db.is_enabled():
+        new_state = db.toggle_asset_in_db(sym)
+        if new_state is None:
+            raise HTTPException(404, f"Simbolo {sym} non trovato")
+        status = "enabled" if new_state else "disabled"
+        all_assets = _load_all_assets()
+        ASSETS = [a for a in all_assets if a.get("enabled", True)]
+        log.info(f"[ASSETS] Toggle {sym}: {status}")
+        return {"status": status, "symbol": sym, "enabled": new_state}
+    all_assets = _load_all_assets()
     idx = next((i for i,a in enumerate(all_assets) if a["symbol"].upper()==sym), None)
     if idx is None:
         raise HTTPException(404, f"Simbolo {sym} non trovato")
@@ -405,8 +452,15 @@ async def toggle_asset(symbol: str):
 async def delete_asset(symbol: str):
     """Elimina definitivamente un asset dalla watchlist."""
     global ASSETS
-    all_assets = _load_all_assets()
     sym = symbol.strip().upper()
+    if db.is_enabled():
+        if not db.delete_asset_from_db(sym):
+            raise HTTPException(404, f"Simbolo {sym} non trovato")
+        all_assets = _load_all_assets()
+        ASSETS = [a for a in all_assets if a.get("enabled", True)]
+        log.info(f"[ASSETS] Eliminato: {sym}")
+        return {"status": "deleted", "symbol": sym, "remaining": len(all_assets)}
+    all_assets = _load_all_assets()
     before = len(all_assets)
     all_assets = [a for a in all_assets if a["symbol"].upper() != sym]
     if len(all_assets) == before:
@@ -528,6 +582,43 @@ async def get_macro():
     m = state.get("macro_context")
     if m: return m
     raise HTTPException(404, "Macro context non ancora disponibile")
+
+# ── Trend / storico DB ────────────────────────────────────────────────────────
+@app.get("/api/trends/{symbol}")
+async def get_trends(symbol: str, days: int = 30):
+    """
+    Storico segnali per un asset (da MariaDB).
+    Utile per costruire grafici di trend score/action nel tempo.
+    """
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato")
+    data = db.get_signal_trend(symbol.upper(), days)
+    return {"symbol": symbol.upper(), "days": days, "count": len(data), "history": data}
+
+@app.get("/api/trends")
+async def get_trends_summary(days: int = 7):
+    """Riepilogo degli ultimi scan con contatori BUY/SELL/WATCHLIST."""
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato")
+    runs = db.get_analysis_summary(days)
+    top  = db.get_top_signals_trend(days)
+    return {"days": days, "runs": runs, "top_signals": top}
+
+@app.get("/api/trends/smart-money")
+async def get_smart_money_trends(limit: int = 10):
+    """Storico delle analisi Smart Money (solo metadati, no JSON completo)."""
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato")
+    return {"history": db.get_smart_money_history(limit)}
+
+@app.get("/api/db/status")
+async def db_status():
+    """Stato connessione MariaDB."""
+    return {
+        "enabled":  db.is_enabled(),
+        "host":     OPTIONS.get("db_host", ""),
+        "database": OPTIONS.get("db_name", ""),
+    }
 
 @app.get("/api/fundamentals/{symbol}")
 async def get_fundamentals(symbol: str):

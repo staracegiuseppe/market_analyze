@@ -456,8 +456,8 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 <div class="tc" id="tab-smartmoney">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
     <div>
-      <div style="font-size:16px;font-weight:700;color:#F9FAFB">🏦 Smart Money Analysis</div>
-      <div style="font-size:11px;color:#6B7280;margin-top:3px">Flussi istituzionali · 13F · Insider Buying · Rotazioni settoriali</div>
+      <div style="font-size:16px;font-weight:700;color:#F9FAFB">🏦 Analisi Smart Money</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:3px">Flussi istituzionali · 13F · Acquisti Insider · Rotazioni settoriali</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <div class="spin" id="sm-spin"></div>
@@ -1364,7 +1364,7 @@ function buildSMCard(opp){
     + (inv?'<div style="font-size:10px;color:#6B7280;margin-top:4px">👥 '+inv+'</div>':'')
     + '</div>'
     + '<div style="text-align:center;flex-shrink:0;margin-left:16px">'
-    + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:3px">SCORE</div>'
+    + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:3px">PUNTEGGIO</div>'
     + '<div style="font-size:32px;font-weight:900;color:'+scc+';font-family:monospace;line-height:1">'+sc+'</div>'
     + '<div style="height:4px;background:#1F2937;border-radius:2px;margin-top:5px;width:60px"><div style="height:4px;width:'+sc+'%;background:'+scc+';border-radius:2px"></div></div>'
     + '<div style="margin-top:8px;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:'+ac+'22;color:'+ac+';border:1px solid '+ac+'44">'+smTrad('action',opp.action)+'</div>'
@@ -1376,7 +1376,9 @@ function buildSMCard(opp){
     + '<div class="sm-info-box"><div class="sm-info-lbl">FONDAMENTALI</div><div style="font-size:11px;color:#9CA3AF;line-height:1.6">'+(opp.fundamental_snapshot||'N/A')+'</div></div>'
     + '<div class="sm-info-box"><div class="sm-info-lbl">STATO TECNICO</div><div style="font-size:14px;font-weight:700;color:'+tc+'">'+smTrad('technical_status',opp.technical_status||'Neutral')+'</div></div>'
     + '<div class="sm-info-box"><div class="sm-info-lbl">RISCHI</div><div style="font-size:11px;color:#9CA3AF;line-height:1.6">'+(opp.risk_summary||'N/A')+'</div></div>'
-    + '</div></div></div>';
+    + '</div>'
+    + (opp.macro_rationale?'<div style="margin-top:10px;padding:8px 10px;background:#0A0F1A;border-radius:5px;border-left:3px solid #3B82F6"><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:3px">CONTESTO MACRO · '+smTrad('macro_alignment',opp.macro_alignment||'')+'</div><div style="font-size:11px;color:#93C5FD;line-height:1.6">'+opp.macro_rationale+'</div></div>':'')
+    + '</div></div>';
 }
 
 async function loadSM(force){
@@ -1447,14 +1449,14 @@ function renderSM(d){
   const nAcc  = opps.filter(o=>o.action==='Accumulate').length;
   const nMon  = opps.filter(o=>o.action==='Monitor').length;
   const nAvoid= opps.filter(o=>o.action==='Avoid').length;
-  const summary_bar = [['Accumulate',nAcc,'#16A34A'],['Monitor',nMon,'#F59E0B'],['Avoid',nAvoid,'#DC2626']]
+  const summary_bar = [['Accumulare',nAcc,'#16A34A'],['Monitorare',nMon,'#F59E0B'],['Evitare',nAvoid,'#DC2626']]
     .map(([l,n,c])=>'<div style="background:#111827;border:1px solid #1F2937;border-radius:8px;padding:12px;text-align:center">'
       + '<div style="font-size:24px;font-weight:900;color:'+c+'">'+n+'</div>'
       + '<div style="font-size:10px;color:#6B7280;margin-top:2px">'+l+'</div></div>').join('');
 
   const sorted = [...opps].sort((a,b)=>(b.score||0)-(a.score||0));
 
-  const stratHtml = [['Trend emergente',summ.trend],['Settori',summ.sector_insights],['Conviction',summ.conviction_level]]
+  const stratHtml = [['Trend emergente',summ.trend],['Settori',summ.sector_insights],['Livello di convinzione',summ.conviction_level]]
     .filter(([,v])=>v)
     .map(([l,v])=>'<div style="background:#0A0F1A;border-radius:8px;padding:14px">'
       + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:5px">'+l.toUpperCase()+'</div>'
