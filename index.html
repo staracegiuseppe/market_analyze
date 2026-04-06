@@ -121,10 +121,15 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   </div>
   <div style="display:flex;gap:10px;align-items:center">
     <a href="https://www.paypal.com/donate?business=staracegiuseppe%40gmail.com&currency_code=EUR&item_name=Market+Analyze" target="_blank" rel="noopener"
-       style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:4px;background:#003087;color:#fff;font-size:10px;font-weight:700;text-decoration:none;letter-spacing:.04em;border:1px solid #0070ba;transition:background .2s"
+       title="Sostieni Market Analyze con PayPal"
+       style="display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:5px;background:#003087;color:#fff;font-size:11px;font-weight:700;text-decoration:none;border:none;box-shadow:0 1px 4px #00000044;transition:background .2s"
        onmouseover="this.style.background='#0070ba'" onmouseout="this.style.background='#003087'">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="#009cde"><path d="M7.4 22H3.6L5.5 10h5.8c3.2 0 5.2 1.6 4.7 4.8C15.4 18.5 12.5 20 9.8 20H7.7L7.4 22zm2.1-5.5h1.9c1.3 0 2.3-.7 2.5-2 .2-1.2-.5-1.8-1.8-1.8H10l-.5 3.8zm7.3-9H11c-.2 0-.3.1-.3.3L9.3 16h2.2c3 0 5.5-1.8 6.1-5.3.4-2.2-.7-3.2-2.8-3.2z"/></svg>
-      Dona
+      <!-- Icona PayPal PP ufficiale -->
+      <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 6h12c7 0 11 3.5 10 10C35 23 30 26 23 26h-4L17 38H9L14 6z" fill="#009cde"/>
+        <path d="M21 11h9c5 0 8 2.5 7.5 7.5C37 24.5 32.5 27 27 27h-3L22.5 38H16L21 11z" fill="#fff" opacity=".85"/>
+      </svg>
+      <span>Dona</span>
     </a>
     <span class="badge b-no" id="hdr-key">● No API Key</span>
     <span style="font-size:10px;color:#6880A0" id="hdr-count">---</span>
@@ -1354,6 +1359,18 @@ function smTrad(field, value){
   return SM_TRAD[field]?.[value] || value;
 }
 
+function getSMIsin(ticker){
+  if(!ticker) return '';
+  const t = ticker.toUpperCase();
+  const base = t.split('.')[0];
+  const sig = allSignals.find(s => {
+    if(!s.symbol) return false;
+    const sym = s.symbol.toUpperCase();
+    return sym === t || sym.split('.')[0] === base;
+  });
+  return (sig && sig.isin && sig.isin !== 'N/A') ? sig.isin : '';
+}
+
 function buildSMCard(opp){
   const ac  = SM_ACT_COL[opp.action]   || '#6B7280';
   const tc  = SM_TECH_COL[opp.technical_status] || '#F59E0B';
@@ -1376,6 +1393,7 @@ function buildSMCard(opp){
     + '</div>'
     + '<div style="font-size:18px;font-weight:800;color:#F9FAFB">'+opp.company+'</div>'
     + '<div style="font-size:12px;color:#9CA3AF;margin-top:2px">'+opp.ticker+' · '+opp.sector+'</div>'
+    + function(){ const isin=getSMIsin(opp.ticker); return isin?'<div style="font-size:10px;color:#6B7280;margin-top:1px">ISIN: '+isin+'</div>':''; }()
     + (inv?'<div style="font-size:10px;color:#6B7280;margin-top:4px">👥 Grandi investitori: '+inv+'</div>':'')
     + '</div>'
     + '<div style="text-align:center;flex-shrink:0;margin-left:16px">'

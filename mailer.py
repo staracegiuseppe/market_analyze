@@ -408,29 +408,44 @@ def build_html_report(results: List[Dict], run_ts: str, next_ts: str, smart_mone
         + f'</tr>{hold_rows}</table></div></div>'
     ) if hold_l else ""
 
-    # Smart money section
+    # Smart Money section — passa assets (results contiene isin) per ISIN lookup
     sm_section = ""
     if smart_money_data and _HAS_SM:
-        sm_section = _sm_section(smart_money_data) or ""
+        sm_section = _sm_section(smart_money_data, assets=results) or ""
+
+    n_disc = 0
+    if smart_money_data and not smart_money_data.get("error"):
+        n_disc = sum(1 for o in smart_money_data.get("opportunities",[]) if o.get("signal_type")=="Discovery")
+
+    sm_riepilogo = ""
+    if smart_money_data and not smart_money_data.get("error"):
+        n_opp  = len(smart_money_data.get("opportunities",[]))
+        qual   = smart_money_data.get("data_quality","?")
+        qcol   = {"high":"#16A34A","medium":"#F59E0B","low":"#DC2626"}.get(qual,"#6B7280")
+        sm_riepilogo = (
+            f' &nbsp;·&nbsp; <span style="color:#A78BFA;font-weight:700">🏦 Smart Money: {n_opp} opportunità'
+            + (f' · 🔭 {n_disc} Scoperte' if n_disc else "")
+            + f' · Qualità <span style="color:{qcol}">{qual.upper()}</span></span>'
+        )
 
     return (
         '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"/></head>'
         '<body style="margin:0;padding:0;background:#0D1117;font-family:\'Segoe UI\',system-ui,sans-serif">'
-        '<div style="max-width:720px;margin:0 auto;padding:20px 14px">'
+        '<div style="max-width:740px;margin:0 auto;padding:20px 14px">'
 
         # Header
         '<div style="background:linear-gradient(135deg,#111827,#1F2937);border:1px solid #374151;'
         'border-radius:12px;padding:24px;margin-bottom:20px;text-align:center">'
         '<div style="font-size:26px;font-weight:800;color:#F9FAFB">⊕ Market Analyze</div>'
-        '<div style="font-size:12px;color:#6B7280;margin-top:6px">REPORT SEGNALI · DATI REALI · AI VALIDATION</div>'
+        '<div style="font-size:12px;color:#6B7280;margin-top:4px">ANALISI COMPLETA · SEGNALI QUANT + SMART MONEY</div>'
         '<div style="margin-top:12px;font-size:11px;color:#9CA3AF">'
         f'📅 {run_dt} &nbsp;·&nbsp; ⏭ Prossimo: {next_dt} &nbsp;·&nbsp; 📊 {len(results)} asset analizzati</div></div>'
 
-        # Riepilogo
+        # Riepilogo unificato (segnali + SM)
         '<div style="background:#111827;border:1px solid #1F2937;border-radius:10px;'
         'padding:14px 20px;margin-bottom:22px;text-align:center">'
-        '<div style="font-size:10px;color:#6B7280;letter-spacing:.1em;margin-bottom:8px">RIEPILOGO</div>'
-        f'<div style="font-size:14px;line-height:2">{riepilogo}</div></div>'
+        '<div style="font-size:10px;color:#6B7280;letter-spacing:.1em;margin-bottom:8px">RIEPILOGO COMPLETO</div>'
+        f'<div style="font-size:13px;line-height:2.2">{riepilogo}{sm_riepilogo}</div></div>'
 
         + _section(buy_l,   "#16A34A", "🟢", "SEGNALI DI ACQUISTO")
         + _section(sell_l,  "#DC2626", "🔴", "SEGNALI DI VENDITA")
@@ -465,7 +480,16 @@ def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict, smart
     parts_s = []
     if n_buy:  parts_s.append(f"{n_buy} ACQUIST{'O' if n_buy==1 else 'I'}")
     if n_sell: parts_s.append(f"{n_sell} VENDIT{'A' if n_sell==1 else 'E'}")
-    subject = f"📊 Market Analyze — {', '.join(parts_s) or 'Nessun segnale'} — {run_ts[:10] if run_ts else ''}"
+    # Aggiunge info Smart Money al soggetto
+    sm_suffix = ""
+    if smart_money_data and not smart_money_data.get("error"):
+        n_opp  = len(smart_money_data.get("opportunities", []))
+        n_disc_subj = sum(1 for o in smart_money_data.get("opportunities",[]) if o.get("signal_type")=="Discovery")
+        if n_opp:
+            sm_suffix = f" · 🏦 SM: {n_opp} opp"
+            if n_disc_subj:
+                sm_suffix += f" ({n_disc_subj} scoperte)"
+    subject = f"📊 Market Analyze — {', '.join(parts_s) or 'Nessun segnale'}{sm_suffix} — {run_ts[:10] if run_ts else ''}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject; msg["From"] = email_from; msg["To"] = email_to

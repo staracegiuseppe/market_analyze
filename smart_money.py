@@ -373,127 +373,244 @@ def run_smart_money_analysis(
 
 
 # ── Sezione email HTML ────────────────────────────────────────────────────────
-def build_email_section(data: Dict) -> str:
-    """Genera la sezione Smart Money per l'email report."""
+_SIGNAL_ICONS_IT = {
+    "New Position": "🆕 Nuova Posizione",
+    "Increase":     "📈 Aumento",
+    "Convergence":  "🔄 Convergenza",
+    "Insider Buy":  "👔 Acquisto Insider",
+    "Discovery":    "🔭 Scoperta",
+}
+_ACTION_IT  = {"Accumulate": "Accumulare", "Monitor": "Monitorare", "Avoid": "Evitare"}
+_TECH_IT    = {"Bullish": "Rialzista", "Neutral": "Neutrale", "Weak": "Debole"}
+_ALIGN_IT   = {"TAILWIND": "Vento favorevole", "HEADWIND": "Vento contrario",
+                "CONTRARIAN": "Contrarian", "NEUTRAL": "Neutrale"}
+
+
+def build_email_section(data: Dict, assets: List = None) -> str:
+    """
+    Genera la sezione Smart Money per l'email report unificata.
+    assets: lista asset [{symbol, isin, ...}] per arricchire con ISIN i titoli noti.
+    """
     if not data or data.get("error") or not data.get("opportunities"):
         return ""
+
+    # Lookup ISIN da assets (watchlist)
+    isin_lookup: Dict[str, str] = {}
+    if assets:
+        for a in assets:
+            sym  = (a.get("symbol") or "").upper()
+            isin = (a.get("isin")   or "")
+            if sym and isin and isin not in ("", "N/A"):
+                isin_lookup[sym] = isin
+                base = sym.split(".")[0]
+                if base not in isin_lookup:
+                    isin_lookup[base] = isin
 
     opportunities = data.get("opportunities", [])
     summary       = data.get("strategic_summary", {})
     warnings      = data.get("warnings", [])
     quality       = data.get("data_quality", "?")
     date          = data.get("analysis_date", "")
+    regime        = data.get("macro_regime", {})
 
     action_colors = {"Accumulate": "#16A34A", "Monitor": "#F59E0B", "Avoid": "#DC2626"}
     tech_colors   = {"Bullish": "#16A34A",    "Neutral": "#F59E0B", "Weak": "#DC2626"}
+    quality_col   = {"high": "#16A34A", "medium": "#F59E0B", "low": "#DC2626"}.get(quality, "#6B7280")
 
-    # Tabella opportunità
-    rows = ""
-    for opp in opportunities:
-        action = opp.get("action", "Monitor")
-        tech   = opp.get("technical_status", "Neutral")
-        score  = opp.get("score", 0)
-        score_col = "#16A34A" if score >= 70 else "#F59E0B" if score >= 50 else "#DC2626"
-        signal_icons = {
-            "New Position":  "🆕", "Increase":    "📈",
-            "Convergence":   "🔄", "Insider Buy": "👔",
-        }
-        signal_icon = signal_icons.get(opp.get("signal_type",""), "📊")
+    # ── Regime macro ─────────────────────────────────────────────────────────
+    regime_html = ""
+    if regime.get("rate_environment"):
+        rate_it   = {"HIKING": "🔺 Tassi in rialzo", "CUTTING": "🔻 Tassi in calo", "HOLD": "➡ Tassi stabili"}.get(regime.get("rate_environment",""), regime.get("rate_environment",""))
+        growth_it = {"EXPANSION": "📈 Espansione", "SLOWDOWN": "📉 Rallentamento", "RECESSION": "⚠ Recessione"}.get(regime.get("growth_outlook",""), regime.get("growth_outlook",""))
+        risk_it   = {"RISK-ON": "🟢 Risk-On", "RISK-OFF": "🔴 Risk-Off", "NEUTRAL": "⚪ Neutrale"}.get(regime.get("risk_appetite",""), regime.get("risk_appetite",""))
+        favored   = " · ".join((regime.get("favored_sectors") or [])[:4])
+        headwind  = " · ".join((regime.get("headwind_sectors") or [])[:3])
+        risks     = "; ".join((regime.get("key_tail_risks") or [])[:2])
+        regime_html = (
+            f'<div style="background:#0A0F1A;border:1px solid #1F2937;border-radius:8px;padding:12px 14px;margin-bottom:14px">'
+            f'<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:8px">REGIME MACRO ATTUALE</div>'
+            f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+            f'<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#1F2937;color:#D1D5DB">{rate_it}</span>'
+            f'<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#1F2937;color:#D1D5DB">{growth_it}</span>'
+            f'<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#1F2937;color:#D1D5DB">{risk_it}</span>'
+            f'</div>'
+            + (f'<div style="font-size:10px;color:#16A34A;margin-bottom:2px">✓ Settori favoriti: {favored}</div>' if favored else "")
+            + (f'<div style="font-size:10px;color:#DC2626;margin-bottom:2px">✗ Settori sfavoriti: {headwind}</div>' if headwind else "")
+            + (f'<div style="font-size:10px;color:#F59E0B">⚠ Rischi: {risks}</div>' if risks else "")
+            + (f'<div style="font-size:11px;color:#9CA3AF;margin-top:8px;border-top:1px solid #1F2937;padding-top:8px;line-height:1.6">{summary.get("macro_regime_summary","")}</div>' if summary.get("macro_regime_summary") else "")
+            + '</div>'
+        )
 
-        rows += f"""
-        <tr style="border-bottom:1px solid #1F2937">
-          <td style="padding:10px 12px;vertical-align:top">
-            <div style="font-weight:700;color:#F9FAFB;font-size:13px">{opp.get("company","")}</div>
-            <div style="color:#9CA3AF;font-size:11px;margin-top:2px">{opp.get("ticker","")} · {opp.get("sector","")}</div>
-          </td>
-          <td style="padding:10px 12px;vertical-align:top;white-space:nowrap">
-            <div style="font-size:12px">{signal_icon} {opp.get("signal_type","")}</div>
-            <div style="font-size:10px;color:#9CA3AF;margin-top:3px">{", ".join(opp.get("key_investors",[])[:2])}</div>
-          </td>
-          <td style="padding:10px 12px;vertical-align:top;max-width:220px">
-            <div style="font-size:11px;color:#D1D5DB;line-height:1.6">{opp.get("why_matters","")}</div>
-            <div style="font-size:10px;color:#6B7280;margin-top:4px">{opp.get("fundamental_snapshot","")}</div>
-          </td>
-          <td style="padding:10px 12px;vertical-align:top;text-align:center;white-space:nowrap">
-            <div style="color:{tech_colors.get(tech,'#9CA3AF')};font-size:11px;font-weight:600">{tech}</div>
-            <div style="font-size:10px;color:#6B7280;margin-top:3px">{opp.get("risk_summary","")[:50]}</div>
-          </td>
-          <td style="padding:10px 12px;vertical-align:top;text-align:center">
-            <div style="font-size:20px;font-weight:800;color:{score_col};font-family:monospace">{score}</div>
-            <div style="height:4px;background:#1F2937;border-radius:2px;margin-top:4px;width:50px">
-              <div style="height:4px;width:{score}%;background:{score_col};border-radius:2px"></div>
-            </div>
-          </td>
-          <td style="padding:10px 12px;vertical-align:top;text-align:center">
-            <div style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;
-                 background:{action_colors.get(action,'#6B7280')}22;color:{action_colors.get(action,'#9CA3AF')};
-                 border:1px solid {action_colors.get(action,'#6B7280')}55">{action}</div>
-          </td>
-        </tr>"""
+    # ── Separazione watchlist / scoperte ─────────────────────────────────────
+    sorted_opps  = sorted(opportunities, key=lambda o: o.get("score",0), reverse=True)
+    in_watchlist = [o for o in sorted_opps if o.get("signal_type") != "Discovery"]
+    discoveries  = [o for o in sorted_opps if o.get("signal_type") == "Discovery"]
 
-    # Summary strategico
-    summary_html = ""
-    if summary.get("trend"):
-        summary_html = f"""
-        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          <div style="background:#0A0F1A;border-radius:6px;padding:12px">
-            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:5px">TREND EMERGENTE</div>
-            <div style="font-size:11px;color:#D1D5DB;line-height:1.6">{summary.get("trend","")}</div>
-          </div>
-          <div style="background:#0A0F1A;border-radius:6px;padding:12px">
-            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:5px">SETTORI</div>
-            <div style="font-size:11px;color:#D1D5DB;line-height:1.6">{summary.get("sector_insights","")}</div>
-          </div>
-          <div style="background:#0A0F1A;border-radius:6px;padding:12px">
-            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:5px">CONVICTION LEVEL</div>
-            <div style="font-size:11px;color:#D1D5DB;line-height:1.6">{summary.get("conviction_level","")}</div>
-          </div>
-        </div>"""
+    def _opp_rows(opps: List[Dict], is_disc: bool = False) -> str:
+        rows = ""
+        for opp in opps:
+            action    = opp.get("action", "Monitor")
+            tech      = opp.get("technical_status", "Neutral")
+            score     = opp.get("score", 0)
+            score_col = "#16A34A" if score >= 70 else "#F59E0B" if score >= 50 else "#DC2626"
+            ac_col    = action_colors.get(action, "#6B7280")
+            tc_col    = tech_colors.get(tech, "#9CA3AF")
+            sig_label = _SIGNAL_ICONS_IT.get(opp.get("signal_type",""), opp.get("signal_type",""))
+            action_it = _ACTION_IT.get(action, action)
+            tech_it   = _TECH_IT.get(tech, tech)
+            align_it  = _ALIGN_IT.get(opp.get("macro_alignment",""), opp.get("macro_alignment",""))
+            investors = ", ".join((opp.get("key_investors") or [])[:2])
 
-    # Warning
+            # ISIN lookup
+            ticker = (opp.get("ticker") or "").upper()
+            isin   = isin_lookup.get(ticker) or isin_lookup.get(ticker.split(".")[0]) or ""
+            isin_html = f'<div style="font-size:9px;color:#6B7280;margin-top:2px">ISIN: {isin}</div>' if isin else ""
+            disc_badge = ('<div style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;'
+                          'background:#7C3AED22;color:#A78BFA;border:1px solid #7C3AED44;margin-top:3px">🔭 SCOPERTA</div>') if is_disc else ""
+
+            rows += (
+                f'<tr style="border-bottom:1px solid #1F2937;{"background:#160D28;" if is_disc else ""}">'
+                # Azienda + ticker + ISIN
+                f'<td style="padding:10px 12px;vertical-align:top">'
+                f'<div style="font-weight:700;color:#F9FAFB;font-size:13px">{opp.get("company","")}</div>'
+                f'<div style="color:#9CA3AF;font-size:11px;margin-top:2px">{opp.get("ticker","")} · {opp.get("sector","")}</div>'
+                f'{isin_html}{disc_badge}'
+                f'</td>'
+                # Segnale + investitori
+                f'<td style="padding:10px 12px;vertical-align:top;white-space:nowrap">'
+                f'<div style="font-size:11px;color:#D1D5DB">{sig_label}</div>'
+                + (f'<div style="font-size:10px;color:#9CA3AF;margin-top:3px">👥 {investors}</div>' if investors else "")
+                + (f'<div style="font-size:9px;color:#6B7280;margin-top:2px">{align_it}</div>' if align_it else "")
+                + f'</td>'
+                # Perché conta + fondamentali + macro
+                f'<td style="padding:10px 12px;vertical-align:top;max-width:230px">'
+                f'<div style="font-size:11px;color:#D1D5DB;line-height:1.6">{opp.get("why_matters","")}</div>'
+                + (f'<div style="font-size:10px;color:#6B7280;margin-top:5px">📊 {opp.get("fundamental_snapshot","")}</div>' if opp.get("fundamental_snapshot") else "")
+                + (f'<div style="font-size:10px;color:#93C5FD;margin-top:4px;font-style:italic">{opp.get("macro_rationale","")}</div>' if opp.get("macro_rationale") else "")
+                + f'</td>'
+                # Tecnico + rischio
+                f'<td style="padding:10px 12px;vertical-align:top;text-align:center;white-space:nowrap">'
+                f'<div style="color:{tc_col};font-size:11px;font-weight:600">{tech_it}</div>'
+                + (f'<div style="font-size:10px;color:#6B7280;margin-top:4px;max-width:120px">{opp.get("risk_summary","")[:60]}</div>' if opp.get("risk_summary") else "")
+                + f'</td>'
+                # Score
+                f'<td style="padding:10px 12px;vertical-align:top;text-align:center">'
+                f'<div style="font-size:22px;font-weight:800;color:{score_col};font-family:monospace">{score}</div>'
+                f'<div style="height:4px;background:#1F2937;border-radius:2px;margin:5px auto 0;width:44px">'
+                f'<div style="height:4px;width:{score}%;background:{score_col};border-radius:2px"></div></div>'
+                f'</td>'
+                # Azione
+                f'<td style="padding:10px 12px;vertical-align:top;text-align:center">'
+                f'<div style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;'
+                f'background:{ac_col}22;color:{ac_col};border:1px solid {ac_col}55">{action_it}</div>'
+                f'</td>'
+                f'</tr>'
+            )
+        return rows
+
+    def _table(opps: List[Dict], is_disc: bool = False) -> str:
+        if not opps:
+            return ""
+        hdr_bg = "#160D28" if is_disc else "#0D1420"
+        hdr_c  = "#A78BFA"  if is_disc else "#6B7280"
+        return (
+            f'<table style="width:100%;border-collapse:collapse;background:#111827;'
+            f'border:1px solid {"#7C3AED44" if is_disc else "#1F2937"};border-radius:8px;overflow:hidden;margin-bottom:10px">'
+            f'<thead><tr style="background:{hdr_bg}">'
+            + "".join(
+                f'<th style="padding:8px 12px;color:{hdr_c};font-size:9px;letter-spacing:.1em;text-align:{a};font-weight:600">{h}</th>'
+                for h, a in [("AZIENDA · TICKER · ISIN","left"),("SEGNALE · INVESTITORI","left"),
+                              ("ANALISI","left"),("TECNICO","center"),("SCORE","center"),("AZIONE","center")]
+            )
+            + f'</tr></thead>'
+            f'<tbody>{_opp_rows(opps, is_disc)}</tbody>'
+            f'</table>'
+        )
+
+    # ── Summary strategico ────────────────────────────────────────────────────
+    summary_items = [
+        ("TREND EMERGENTE",         summary.get("trend","")),
+        ("SETTORI CHIAVE",          summary.get("sector_insights","")),
+        ("LIVELLO DI CONVINZIONE",  summary.get("conviction_level","")),
+        ("SCOPERTE EMERGENTI",      summary.get("discovery_insight","")),
+    ]
+    summ_cells = "".join(
+        f'<td style="padding:10px 12px;vertical-align:top;background:#0A0F1A;border-right:1px solid #1F2937">'
+        f'<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:5px">{lbl}</div>'
+        f'<div style="font-size:11px;color:#D1D5DB;line-height:1.6">{val}</div>'
+        f'</td>'
+        for lbl, val in summary_items if val
+    )
+    summary_html = (
+        f'<table style="width:100%;border-collapse:collapse;background:#0A0F1A;'
+        f'border:1px solid #1F2937;border-radius:8px;margin-top:14px">'
+        f'<tr>{summ_cells}</tr></table>'
+    ) if summ_cells else ""
+
+    # ── Warning ───────────────────────────────────────────────────────────────
     warn_items = "".join(
         f'<li style="margin-bottom:4px;color:#9CA3AF;font-size:11px">⚠ {w}</li>'
         for w in warnings
     )
     warn_html = f'<ul style="margin:10px 0 0 0;padding:0 0 0 16px">{warn_items}</ul>' if warn_items else ""
 
-    quality_col = {"high": "#16A34A", "medium": "#F59E0B", "low": "#DC2626"}.get(quality, "#6B7280")
+    return (
+        f'<div style="margin-top:30px;border-top:2px solid #1F2937;padding-top:24px">'
 
-    return f"""
-    <div style="margin-top:30px;border-top:2px solid #1F2937;padding-top:24px">
+        # Intestazione sezione
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+        f'<div>'
+        f'<div style="font-size:20px;font-weight:800;color:#F9FAFB">🏦 Analisi Smart Money</div>'
+        f'<div style="font-size:11px;color:#6B7280;margin-top:2px">'
+        f'Flussi istituzionali · 13F · Acquisti Insider · Scoperte · {date}</div>'
+        f'</div>'
+        f'<div style="text-align:right">'
+        f'<div style="font-size:9px;color:#6B7280;letter-spacing:.1em">QUALITÀ DATI</div>'
+        f'<div style="font-size:13px;font-weight:700;color:{quality_col}">{quality.upper()}</div>'
+        f'</div></div>'
 
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div>
-          <div style="font-size:18px;font-weight:800;color:#F9FAFB">🏦 Smart Money Analysis</div>
-          <div style="font-size:11px;color:#6B7280;margin-top:2px">
-            Flussi istituzionali · 13F · Insider Buying · {date}
-          </div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:9px;color:#6B7280;letter-spacing:.1em">QUALITÀ DATI</div>
-          <div style="font-size:13px;font-weight:700;color:{quality_col}">{quality.upper()}</div>
-        </div>
-      </div>
+        # Regime macro
+        + regime_html
 
-      <table style="width:100%;border-collapse:collapse;background:#111827;border:1px solid #1F2937;border-radius:8px;overflow:hidden">
-        <thead>
-          <tr style="background:#0D1420">
-            <th style="padding:10px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">AZIENDA</th>
-            <th style="padding:10px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">SEGNALE</th>
-            <th style="padding:10px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:left;font-weight:600">PERCHÉ CONTA</th>
-            <th style="padding:10px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:center;font-weight:600">TECNICO / RISCHIO</th>
-            <th style="padding:10px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:center;font-weight:600">SCORE</th>
-            <th style="padding:10px 12px;color:#6B7280;font-size:9px;letter-spacing:.1em;text-align:center;font-weight:600">AZIONE</th>
-          </tr>
-        </thead>
-        <tbody>{rows}</tbody>
-      </table>
+        # Contatori
+        + f'<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
+        + "".join(
+            f'<div style="background:#111827;border:1px solid {c};border-radius:6px;padding:8px 12px;text-align:center;min-width:80px">'
+            f'<div style="font-size:20px;font-weight:900;color:{c}">{n}</div>'
+            f'<div style="font-size:9px;color:#6B7280;margin-top:2px">{l}</div></div>'
+            for l, n, c in [
+                ("Accumulare", sum(1 for o in opportunities if o.get("action")=="Accumulate"), "#16A34A"),
+                ("Monitorare", sum(1 for o in opportunities if o.get("action")=="Monitor"),    "#F59E0B"),
+                ("Evitare",    sum(1 for o in opportunities if o.get("action")=="Avoid"),      "#DC2626"),
+                ("Scoperte",   len(discoveries),                                                "#A78BFA"),
+            ]
+        )
+        + f'</div>'
 
-      {summary_html}
+        # Tabella asset in watchlist
+        + (f'<div style="font-size:10px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase;margin:10px 0 6px">📊 Segnali su Asset Monitorati ({len(in_watchlist)})</div>' if in_watchlist else "")
+        + _table(in_watchlist, is_disc=False)
 
-      <div style="margin-top:12px;padding:10px 14px;background:#1A0F0A;border:1px solid #DC262622;border-radius:6px">
-        <div style="font-size:9px;color:#DC2626;letter-spacing:.1em;font-weight:600;margin-bottom:2px">⚠ AVVERTENZE ANALISI</div>
-        {warn_html}
-      </div>
+        # Tabella scoperte
+        + (
+            f'<div style="margin-top:18px;padding:10px 14px;background:#160D28;border:1px solid #7C3AED44;border-radius:8px;margin-bottom:10px">'
+            f'<div style="font-size:14px;font-weight:800;color:#A78BFA">🔭 Scoperte — Titoli ad Alto Potenziale</div>'
+            f'<div style="font-size:11px;color:#7C3AED;margin-top:3px">Titoli fuori watchlist identificati dai grandi investitori — non ancora sul radar del grande pubblico</div>'
+            f'</div>'
+            + _table(discoveries, is_disc=True)
+            if discoveries else ""
+        )
 
-    </div>"""
+        # Riepilogo strategico
+        + summary_html
+
+        # Warning
+        + (
+            f'<div style="margin-top:12px;padding:10px 14px;background:#1A0F0A;border:1px solid #DC262622;border-radius:6px">'
+            f'<div style="font-size:9px;color:#DC2626;letter-spacing:.1em;font-weight:600;margin-bottom:2px">⚠ AVVERTENZE</div>'
+            + warn_html + f'</div>'
+            if warn_html else ""
+        )
+
+        + f'</div>'
+    )
