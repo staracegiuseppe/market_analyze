@@ -13,7 +13,7 @@ from market_data            import fetch_all, load_assets, lookup_isin
 from smart_money            import run_smart_money_analysis, build_email_section
 from macro_layer            import fetch_macro_context
 from fundamental_layer      import fetch_all_fundamentals
-from scoring_engine         import run_composite_scanner
+from scoring_engine         import run_composite_scanner, enrich_with_smart_money
 from signal_engine          import run_scanner, build_quant_signal, is_trading_hours
 from ai_validation          import apply_ai_enrichment
 from backtest_engine        import backtest_symbol, backtest_batch, BacktestConfig
@@ -252,7 +252,11 @@ def run_scan():
             log.info("[STEP 3.5/4 SMART_MONEY] analisi istituzionale...")
             sm = run_smart_money_analysis([a["symbol"] for a in ASSETS], CLAUDE_KEY, PPLX_KEY)
             state["smart_money"] = sm
-            log.info(f"[STEP 3.5/4 SMART_MONEY] {len(sm.get('opportunities',[]))} opp | qualita={sm.get('data_quality','?')}")
+            n_opp = len(sm.get('opportunities', []))
+            log.info(f"[STEP 3.5/4 SMART_MONEY] {n_opp} opp | qualita={sm.get('data_quality','?')}")
+            if n_opp and state.get("signals"):
+                state["signals"] = enrich_with_smart_money(state["signals"], sm)
+                log.info(f"[STEP 3.5/4 SMART_MONEY] Segnali asset arricchiti con overlay Smart Money")
         except Exception as e:
             log.error(f"[STEP 3.5/4 SMART_MONEY] {e}")
 
@@ -527,7 +531,9 @@ async def refresh_smart_money(background_tasks: BackgroundTasks):
     def _run():
         result = run_smart_money_analysis(symbols, CLAUDE_KEY, PPLX_KEY, force_refresh=True)
         state["smart_money"] = result
-        log.info("[SMART_MONEY] Analisi aggiornata via API")
+        if result.get("opportunities") and state.get("signals"):
+            state["signals"] = enrich_with_smart_money(state["signals"], result)
+        log.info("[SMART_MONEY] Analisi aggiornata e segnali arricchiti via API")
     background_tasks.add_task(_run)
     return {"status": "started"}
 

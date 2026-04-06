@@ -445,3 +445,88 @@ def run_composite_scanner(
         f"{len(watchlist)} WATCHLIST"
     )
     return results
+
+
+def enrich_with_smart_money(signals: List[Dict], sm_data: Optional[Dict]) -> List[Dict]:
+    """
+    Merge Smart Money AI analysis back into each asset signal.
+    Called after run_smart_money_analysis() completes.
+    Attaches s["smart_money"] overlay and adjusts composite_score by ±0..8 pts.
+    """
+    if not sm_data or sm_data.get("error") or not sm_data.get("opportunities"):
+        return signals
+
+    opportunities = sm_data.get("opportunities", [])
+    macro_regime  = sm_data.get("macro_regime", {})
+
+    # Build lookup: ticker (uppercased) → opportunity
+    opp_by_ticker: Dict[str, Dict] = {}
+    for opp in opportunities:
+        ticker = (opp.get("ticker") or "").upper().strip()
+        if ticker:
+            opp_by_ticker[ticker] = opp
+
+    for sig in signals:
+        sym = sig.get("symbol", "").upper()
+        # Exact match, then base symbol (strip exchange suffix: ENI.MI → ENI)
+        opp = opp_by_ticker.get(sym)
+        if opp is None:
+            base = sym.split(".")[0]
+            opp  = opp_by_ticker.get(base)
+
+        if opp is None:
+            sig.setdefault("smart_money", None)
+            continue
+
+        sm_score  = opp.get("score", 50)
+        sm_action = opp.get("action", "Monitor")  # Accumulate | Monitor | Avoid
+
+        # Convert SM score + action to directional adjustment (-8..+8)
+        if sm_action == "Accumulate":
+            sm_adj = round(max(0.0, (sm_score - 50) / 50 * 8), 1)
+        elif sm_action == "Avoid":
+            sm_adj = round(-max(0.0, (50 - sm_score) / 50 * 8) - 3.0, 1)
+        else:  # Monitor — weak signal
+            sm_adj = round((sm_score - 50) / 100 * 4, 1)
+
+        # Apply to composite_score
+        old_composite = sig.get("composite_score", sig.get("score", 0))
+        new_composite = max(-100, min(100, old_composite + int(sm_adj)))
+        sig["composite_score"] = new_composite
+
+        # Re-derive action from updated composite (same thresholds)
+        if sig.get("action") not in ("NO_DATA",):
+            if new_composite >= BUY_THRESHOLD:
+                sig["action"] = "BUY"
+            elif new_composite <= SELL_THRESHOLD:
+                sig["action"] = "SELL"
+            elif new_composite >= WATCHLIST_BULL_THR:
+                sig["action"] = "WATCHLIST"
+            elif new_composite <= WATCHLIST_BEAR_THR:
+                sig["action"] = "WATCHLIST"
+            else:
+                sig["action"] = "HOLD"
+
+        sig["smart_money"] = {
+            "score":                sm_score,
+            "action":               sm_action,
+            "signal_type":          opp.get("signal_type", ""),
+            "macro_alignment":      opp.get("macro_alignment", "NEUTRAL"),
+            "macro_rationale":      opp.get("macro_rationale", ""),
+            "key_investors":        opp.get("key_investors", []),
+            "why_matters":          opp.get("why_matters", ""),
+            "fundamental_snapshot": opp.get("fundamental_snapshot", ""),
+            "risk_summary":         opp.get("risk_summary", ""),
+            "technical_status":     opp.get("technical_status", ""),
+            "sm_adj":               sm_adj,
+            "macro_regime":         macro_regime,
+        }
+
+        if sm_adj:
+            log.info(
+                f"[SM_ENRICH] {sym}: {sm_action} score={sm_score} "
+                f"adj={sm_adj:+.1f} composite: {old_composite:+d}→{new_composite:+d} "
+                f"action={sig['action']}"
+            )
+
+    return signals

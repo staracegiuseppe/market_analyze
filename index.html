@@ -741,6 +741,33 @@ function buildCard(s){
       + '</div></div>';
   }
 
+  // ── Smart Money AI overlay ────────────────────────────────────────────────
+  const sm = s.smart_money;
+  let smHtml = '';
+  if(sm && sm.score !== undefined){
+    const smActCol  = sm.action==='Accumulate'?'#16A34A':sm.action==='Avoid'?'#DC2626':'#F59E0B';
+    const smAlnCol  = sm.macro_alignment==='TAILWIND'?'#16A34A':sm.macro_alignment==='HEADWIND'?'#DC2626':sm.macro_alignment==='CONTRARIAN'?'#F59E0B':'#6B7280';
+    const smScrCol  = sm.score>=70?'#16A34A':sm.score>=50?'#F59E0B':'#DC2626';
+    const sigIcons  = {'New Position':'🆕','Increase':'📈','Convergence':'🔄','Insider Buy':'👔','Discovery':'🔭'};
+    const sigIcon   = sigIcons[sm.signal_type] || '📊';
+    const investors = (sm.key_investors||[]).slice(0,3).join(', ');
+    smHtml = '<div style="margin-top:12px;padding:10px 14px;background:#0A0F1A;border-left:3px solid #3D8EF0;border-radius:0 4px 4px 0">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+      + '<div style="font-size:9px;color:#3D8EF0;letter-spacing:.1em;font-weight:700">🏦 SMART MONEY AI</div>'
+      + '<div style="display:flex;gap:6px;align-items:center">'
+      + (sm.signal_type?'<span style="font-size:9px;color:#6B7280">'+sigIcon+' '+sm.signal_type+'</span>':'')
+      + '<span style="font-size:9px;padding:2px 7px;border-radius:3px;background:'+smActCol+'18;color:'+smActCol+';border:1px solid '+smActCol+'44;font-weight:700">'+sm.action.toUpperCase()+'</span>'
+      + '<span style="font-size:13px;font-weight:800;color:'+smScrCol+';font-family:monospace">'+sm.score+'</span>'
+      + '</div></div>'
+      + (sm.macro_alignment?'<div style="font-size:10px;margin-bottom:4px"><span style="color:'+smAlnCol+';font-weight:600">'+sm.macro_alignment+'</span>'
+          +(sm.macro_rationale?' <span style="color:#9CA3AF">— '+escH(sm.macro_rationale)+'</span>':'')+'</div>':'')
+      + (investors?'<div style="font-size:10px;color:#6B7280;margin-bottom:4px">Investitori: '+escH(investors)+'</div>':'')
+      + (sm.why_matters?'<div style="font-size:11px;color:#D1D5DB;line-height:1.6;margin-bottom:3px">'+escH(sm.why_matters)+'</div>':'')
+      + (sm.risk_summary?'<div style="font-size:9px;color:#6B7280">⚠ '+escH(sm.risk_summary)+'</div>':'')
+      + (sm.sm_adj?'<div style="font-size:9px;color:#374151;margin-top:4px">Aggiustamento composito: <b style="color:'+(sm.sm_adj>0?'#16A34A':'#DC2626')+'">'+(sm.sm_adj>0?'+':'')+sm.sm_adj+' pt</b></div>':'')
+      + '</div>';
+  }
+
   // ── Extra: divergenza RSI e BB squeeze ───────────────────────────────────
   const divType = safe(ind.rsi_divergence, 'none');
   const bbSqueeze = safe(ind.bb_squeeze, false);
@@ -780,7 +807,7 @@ function buildCard(s){
     + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
     + '</div>'
     // Body
-    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+indHtml+secHtml+instHtml+aiHtml+newsHtml+'</div>'
+    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+indHtml+secHtml+instHtml+smHtml+aiHtml+newsHtml+'</div>'
     + '</div>';
 }
 
