@@ -266,6 +266,18 @@ def _macro_score(m: Dict) -> Tuple[int, Dict]:
         else:
             score -= 3; breakdown["dxy"] = -3; notes.append("USD molto forte → headwind globale")
 
+    # 6. PIL reale USA QoQ (+/-3)
+    gdp = m.get("gdp_growth")
+    if gdp is not None:
+        if gdp >= 3.0:
+            score += 3; breakdown["gdp"] = +3; notes.append(f"PIL USA {gdp:.1f}% → crescita robusta")
+        elif gdp >= 1.0:
+            score += 2; breakdown["gdp"] = +2; notes.append(f"PIL USA {gdp:.1f}% → crescita moderata")
+        elif gdp >= 0.0:
+            score -= 1; breakdown["gdp"] = -1; notes.append(f"PIL USA {gdp:.1f}% → crescita anemica")
+        else:
+            score -= 3; breakdown["gdp"] = -3; notes.append(f"PIL USA {gdp:.1f}% → contrazione/recessione")
+
     # Cap finale
     score = max(-20, min(20, score))
     return score, {"score": score, "breakdown": breakdown, "notes": notes}
@@ -292,18 +304,19 @@ def fetch_macro_context(
 
     # ── FRED ─────────────────────────────────────────────────────────────────
     if fred_key:
-        log.info("[MACRO] FRED: fetching Fed Funds, CPI, Treasury yields...")
-        m["fed_funds"]   = _fred_latest("FEDFUNDS",  fred_key)
-        m["cpi_usa"]     = _fred_latest("CPIAUCSL",  fred_key)
-        m["treasury_2y"] = _fred_latest("DGS2",      fred_key)
-        m["treasury_10y"]= _fred_latest("DGS10",     fred_key)
-        m["treasury_30y"]= _fred_latest("DGS30",     fred_key)
-        m["yield_curve"] = _fred_latest("T10Y2Y",    fred_key)  # spread 10Y-2Y
-        m["unemp_usa"]   = _fred_latest("UNRATE",    fred_key)
+        log.info("[MACRO] FRED: fetching Fed Funds, CPI, Treasury yields, GDP...")
+        m["fed_funds"]    = _fred_latest("FEDFUNDS",        fred_key)
+        m["cpi_usa"]      = _fred_latest("CPIAUCSL_PC1",    fred_key)  # YoY % (non livello raw)
+        m["treasury_2y"]  = _fred_latest("DGS2",            fred_key)
+        m["treasury_10y"] = _fred_latest("DGS10",           fred_key)
+        m["treasury_30y"] = _fred_latest("DGS30",           fred_key)
+        m["yield_curve"]  = _fred_latest("T10Y2Y",          fred_key)  # spread 10Y-2Y
+        m["unemp_usa"]    = _fred_latest("UNRATE",          fred_key)
+        m["gdp_growth"]   = _fred_latest("A191RL1Q225SBEA", fred_key)  # Real GDP QoQ %
         # Variazione Fed Funds negli ultimi 12 mesi
-        m["fed_delta_12m"]= _fred_delta("FEDFUNDS",  fred_key, 12)
-        log.info(f"[MACRO] FRED: Fed={m.get('fed_funds')} CPI={m.get('cpi_usa')} 10Y={m.get('treasury_10y')} "
-                 f"Curve={m.get('yield_curve')}")
+        m["fed_delta_12m"]= _fred_delta("FEDFUNDS",         fred_key, 12)
+        log.info(f"[MACRO] FRED: Fed={m.get('fed_funds')} CPI={m.get('cpi_usa')}% "
+                 f"GDP={m.get('gdp_growth')}% 10Y={m.get('treasury_10y')} Curve={m.get('yield_curve')}")
     else:
         log.info("[MACRO] FRED: no api_key — skip")
 
@@ -377,6 +390,7 @@ def fetch_macro_context(
             "fed_funds":       m.get("fed_funds"),
             "fed_delta_12m":   m.get("fed_delta_12m"),
             "cpi_usa":         m.get("cpi_usa"),
+            "gdp_growth":      m.get("gdp_growth"),
             "treasury_2y":     m.get("treasury_2y"),
             "treasury_10y":    m.get("treasury_10y"),
             "yield_curve_10y2y": m.get("yield_curve"),

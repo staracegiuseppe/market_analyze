@@ -71,25 +71,49 @@ def _get_etf_info(symbol: str, fmp_key: str) -> Optional[Dict]:
         return data[0]
     return None
 
+def _get_dividend_growth(symbol: str, fmp_key: str) -> Optional[float]:
+    """
+    Calcola CAGR dividendo sugli ultimi anni da FMP dividend history.
+    Return: float (es. 0.06 = +6%/anno) o None se dati insufficienti.
+    """
+    data = _fmp_get(f"historical-price-full/stock_dividend/{symbol}", fmp_key, {"limit": "8"})
+    if not data:
+        return None
+    hist = data.get("historical", []) if isinstance(data, dict) else []
+    divs = [h.get("adjDividend") or h.get("dividend", 0) for h in hist if (h.get("adjDividend") or h.get("dividend", 0)) > 0]
+    if len(divs) < 4:
+        return None
+    # Confronta media ultimi 2 pagamenti vs media dei 2 più vecchi disponibili
+    recent = sum(divs[:2]) / 2
+    old    = sum(divs[-2:]) / 2
+    if old <= 0 or recent <= 0:
+        return None
+    years = max(1, len(divs) / 4)  # stima anni in base alla frequenza (4 = annuale, 8 = biennale)
+    try:
+        cagr = (recent / old) ** (1 / years) - 1
+        return round(float(cagr), 4)
+    except Exception:
+        return None
+
 
 # ── Scoring fondamentali per azioni ──────────────────────────────────────────
 def _score_stock(symbol: str, fmp_key: str) -> Tuple[int, Dict]:
     """
-    fundamental_score per azione: -15 a +15
-    Dimensioni: qualità, crescita, valutazione, flussi di cassa
+    fundamental_score per azione: -20 a +20
+    Dimensioni: crescita, margini, valutazione, FCF, qualità, dividendo
     """
     score     = 0
     detail    = {}
     reasons   = []
 
     # Key metrics TTM
-    metrics = _get_ratios(symbol, fmp_key)
-    if not metrics:
+    km = _get_ratios(symbol, fmp_key)
+    if not km:
         log.info(f"[FUND] {symbol}: no FMP data — score=0")
         return 0, {"score": 0, "detail": {}, "reasons": ["Fondamentali non disponibili"], "source": "none"}
 
-    # 1. Revenue growth QoQ (+/-4)
-    rev_growth = metrics.get("revenueGrowth")
+    # 1. Revenue growth (+/-4)
+    rev_growth = km.get("revenueGrowth")
     if rev_growth is not None:
         if rev_growth > 0.20:
             score += 4; detail["rev_growth"] = +4; reasons.append(f"Revenue +{rev_growth*100:.1f}% → crescita forte")
@@ -103,32 +127,41 @@ def _score_stock(symbol: str, fmp_key: str) -> Tuple[int, Dict]:
             score -= 4; detail["rev_growth"] = -4; reasons.append(f"Revenue {rev_growth*100:.1f}% → contrazione")
 
     # 2. Margine operativo (+/-3)
-    op_margin = metrics.get("operatingIncomeRatioTTM") or metrics.get("operatingProfitMargin")
+    op_margin = km.get("operatingIncomeRatioTTM") or km.get("operatingProfitMargin")
     if op_margin is not None:
         if op_margin > 0.20:
             score += 3; detail["op_margin"] = +3; reasons.append(f"Margine operativo {op_margin*100:.1f}% → eccellente")
         elif op_margin > 0.10:
             score += 1; detail["op_margin"] = +1; reasons.append(f"Margine operativo {op_margin*100:.1f}% → sano")
-        elif op_margin > 0:
-            pass
-        else:
-            score -= 3; detail["op_margin"] = -3; reasons.append(f"Margine operativo negativo → rischio")
+        elif op_margin <= 0:
+            score -= 3; detail["op_margin"] = -3; reasons.append("Margine operativo negativo → rischio")
 
-    # 3. Free Cash Flow Yield (+/-3)
-    fcf_ps  = metrics.get("freeCashFlowPerShareTTM")
-    price   = metrics.get("marketCapTTM")
-    if fcf_ps and price and price > 0:
-        fcf_yield = fcf_ps / (price / (metrics.get("sharesOutstanding") or 1))
-        if fcf_yield is not None and abs(fcf_yield) < 100:  # sanity check
-            if fcf_yield > 0.08:
-                score += 3; detail["fcf_yield"] = +3; reasons.append(f"FCF Yield {fcf_yield*100:.1f}% → ottimo")
-            elif fcf_yield > 0.04:
-                score += 1; detail["fcf_yield"] = +1
-            elif fcf_yield < 0:
-                score -= 2; detail["fcf_yield"] = -2; reasons.append("FCF negativo → attenzione")
+    # 3. Margine lordo (+/-2)
+    gross_margin = km.get("grossProfitMarginTTM")
+    if gross_margin is not None:
+        if gross_margin > 0.50:
+            score += 2; detail["gross_margin"] = +2; reasons.append(f"Margine lordo {gross_margin*100:.1f}% → pricing power")
+        elif gross_margin > 0.30:
+            score += 1; detail["gross_margin"] = +1
+        elif gross_margin < 0.20:
+            score -= 1; detail["gross_margin"] = -1; reasons.append(f"Margine lordo basso {gross_margin*100:.1f}%")
 
-    # 4. Valutazione P/E (+/-3)
-    pe = metrics.get("peRatioTTM")
+    # 4. P/FCF — price-to-free-cash-flow (+/-3)
+    p_fcf = km.get("priceToFreeCashFlowTTM")
+    if p_fcf is not None and p_fcf != 0:
+        if 0 < p_fcf < 15:
+            score += 3; detail["p_fcf"] = +3; reasons.append(f"P/FCF {p_fcf:.1f} → sottovalutato su FCF")
+        elif p_fcf < 25:
+            score += 2; detail["p_fcf"] = +2; reasons.append(f"P/FCF {p_fcf:.1f} → ragionevole")
+        elif p_fcf < 40:
+            score += 1; detail["p_fcf"] = +1
+        elif p_fcf > 40:
+            score -= 2; detail["p_fcf"] = -2; reasons.append(f"P/FCF {p_fcf:.1f} → caro su FCF")
+        elif p_fcf < 0:
+            score -= 2; detail["p_fcf"] = -2; reasons.append("FCF negativo → attenzione")
+
+    # 5. P/E (+/-3)
+    pe = km.get("peRatioTTM")
     if pe is not None and pe > 0:
         if pe < 15:
             score += 3; detail["pe"] = +3; reasons.append(f"P/E {pe:.1f} → sottovalutato")
@@ -141,28 +174,88 @@ def _score_stock(symbol: str, fmp_key: str) -> Tuple[int, Dict]:
     elif pe is not None and pe < 0:
         score -= 2; detail["pe"] = -2; reasons.append("P/E negativo (perdite)")
 
-    # 5. Debt/Equity (+/-2)
-    de = metrics.get("debtToEquityTTM")
+    # 6. ROE (+/-2)
+    roe = km.get("roeTTM")
+    if roe is not None:
+        if roe > 0.20:
+            score += 2; detail["roe"] = +2; reasons.append(f"ROE {roe*100:.1f}% → redditività eccellente")
+        elif roe > 0.15:
+            score += 1; detail["roe"] = +1
+        elif roe < 0.05:
+            score -= 2; detail["roe"] = -2; reasons.append(f"ROE {roe*100:.1f}% → redditività bassa")
+
+    # 7. ROIC (+/-2)
+    roic = km.get("roicTTM")
+    if roic is not None:
+        if roic > 0.15:
+            score += 2; detail["roic"] = +2; reasons.append(f"ROIC {roic*100:.1f}% → creazione valore")
+        elif roic > 0.10:
+            score += 1; detail["roic"] = +1
+        elif roic < 0.05:
+            score -= 2; detail["roic"] = -2; reasons.append(f"ROIC {roic*100:.1f}% → capitale mal allocato")
+
+    # 8. Debt/Equity (+/-2)
+    de = km.get("debtToEquityTTM")
     if de is not None:
         if de < 0.3:
             score += 2; detail["debt"] = +2; reasons.append("Basso indebitamento")
         elif de < 1.0:
-            score += 0
+            pass
         elif de < 2.0:
             score -= 1; detail["debt"] = -1
         else:
             score -= 2; detail["debt"] = -2; reasons.append(f"Debito elevato D/E={de:.1f}")
 
-    score = max(-15, min(15, score))
+    # 9. Dividend yield (+/-3)
+    div_yield = km.get("dividendYieldTTM")
+    if div_yield is not None:
+        dy_pct = div_yield * 100
+        if 4.0 <= dy_pct <= 6.0:
+            score += 3; detail["div_yield"] = +3; reasons.append(f"Dividend yield {dy_pct:.1f}% → reddito eccellente")
+        elif 2.0 <= dy_pct < 4.0:
+            score += 2; detail["div_yield"] = +2; reasons.append(f"Dividend yield {dy_pct:.1f}% → buona rendita")
+        elif 1.0 <= dy_pct < 2.0:
+            score += 1; detail["div_yield"] = +1
+        elif dy_pct > 6.0:
+            score += 2; detail["div_yield"] = +2; reasons.append(f"Dividend yield {dy_pct:.1f}% → alto (verificare sostenibilità)")
+
+    # 10. Payout ratio (+/-2)
+    payout = km.get("payoutRatioTTM")
+    if payout is not None and payout > 0:
+        if payout < 0.40:
+            score += 2; detail["payout"] = +2; reasons.append(f"Payout {payout*100:.0f}% → dividendo sostenibile")
+        elif payout < 0.70:
+            score += 1; detail["payout"] = +1
+        elif payout > 0.90:
+            score -= 2; detail["payout"] = -2; reasons.append(f"Payout {payout*100:.0f}% → dividendo a rischio taglio")
+
+    # 11. Dividend growth (nuovo helper, +/-2)
+    div_growth = _get_dividend_growth(symbol, fmp_key)
+    if div_growth is not None:
+        if div_growth > 0.05:
+            score += 2; detail["div_growth"] = +2; reasons.append(f"Crescita dividendo +{div_growth*100:.1f}%/anno")
+        elif div_growth > 0.01:
+            score += 1; detail["div_growth"] = +1
+        elif div_growth < 0:
+            score -= 1; detail["div_growth"] = -1; reasons.append("Dividendo in riduzione")
+
+    score = max(-20, min(20, score))
     return score, {
         "score":   score,
         "detail":  detail,
         "reasons": reasons,
         "metrics": {
-            "pe":         pe,
-            "rev_growth": rev_growth,
-            "op_margin":  op_margin,
-            "de":         de,
+            "pe":          pe,
+            "p_fcf":       p_fcf,
+            "rev_growth":  rev_growth,
+            "op_margin":   op_margin,
+            "gross_margin":gross_margin,
+            "roe":         roe,
+            "roic":        roic,
+            "de":          de,
+            "div_yield":   div_yield,
+            "payout":      payout,
+            "div_growth":  div_growth,
         },
         "source": "FMP",
     }
@@ -182,8 +275,9 @@ def _score_etf(symbol: str, fmp_key: str) -> Tuple[int, Dict]:
     detail  = {}
     reasons = []
 
-    aum = etf.get("netAssets") or etf.get("totalAssets")
-    ter = etf.get("expenseRatio")
+    aum       = etf.get("netAssets") or etf.get("totalAssets")
+    ter       = etf.get("expenseRatio")
+    div_yield = etf.get("dividendYield") or etf.get("dividendYieldTTM")
 
     # AUM (+/-3)
     if aum:
@@ -203,12 +297,22 @@ def _score_etf(symbol: str, fmp_key: str) -> Tuple[int, Dict]:
         elif ter > 0.60:
             score -= 2; detail["ter"] = -2; reasons.append(f"TER {ter:.2f}% → costoso")
 
+    # Dividend yield ETF (+/-2)
+    if div_yield is not None and div_yield > 0:
+        dy_pct = div_yield * 100 if div_yield < 1 else div_yield  # normalizza se già in %
+        if dy_pct >= 3.0:
+            score += 2; detail["div_yield"] = +2; reasons.append(f"Distribuzione ETF {dy_pct:.1f}% → buona rendita")
+        elif dy_pct >= 1.5:
+            score += 1; detail["div_yield"] = +1
+    else:
+        div_yield = None
+
     score = max(-10, min(10, score))
     return score, {
         "score":   score,
         "detail":  detail,
         "reasons": reasons,
-        "metrics": {"aum": aum, "ter": ter},
+        "metrics": {"aum": aum, "ter": ter, "div_yield": div_yield},
         "source":  "FMP",
     }
 

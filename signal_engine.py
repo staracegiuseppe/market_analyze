@@ -313,6 +313,13 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
         "bounce_probability": bounce_prob,
     }
 
+    # Bonus qualità: Sharpe > 1 indica buon risk-adjusted return
+    risk_metrics = ind.get("risk_metrics", {})
+    sharpe = risk_metrics.get("sharpe_1y")
+    if sharpe is not None and sharpe > 1.0:
+        quality_pts += 1
+        signal_quality = min(5, max(1, quality_pts))
+
     return {**base,
         "action":            action,
         "confidence":        conf,
@@ -332,6 +339,7 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
         "bounce_probability": bounce_prob,
         "value_trap_flag":   is_value_trap,
         "action_effective":  action if is_trading_hours() else "HOLD (market closed)",
+        "risk_metrics":      risk_metrics,
     }
 
 

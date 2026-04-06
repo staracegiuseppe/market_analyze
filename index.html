@@ -799,6 +799,83 @@ function buildCard(s){
       + '</div>';
   }
 
+  // ── Risk metrics ────────────────────────────────────────────────────────────
+  const rm = s.risk_metrics || {};
+  const sharpe1y = rm.sharpe_1y;
+  const sortino1y = rm.sortino_1y;
+  const maxdd1y = rm.max_drawdown_1y_pct;
+  const betaVal = rm.beta;
+  const var95 = rm.var_95_1d_pct;
+  let riskHtml = '';
+  if(sharpe1y !== undefined || maxdd1y !== undefined){
+    const shCol = sharpe1y >= 1.5 ? '#16A34A' : sharpe1y >= 0.5 ? '#F59E0B' : '#DC2626';
+    const ddCol = maxdd1y !== null && maxdd1y !== undefined ? (maxdd1y > -10 ? '#16A34A' : maxdd1y > -25 ? '#F59E0B' : '#DC2626') : '#6B7280';
+    const bCol  = betaVal !== null && betaVal !== undefined ? (betaVal < 0.8 ? '#16A34A' : betaVal < 1.2 ? '#F59E0B' : '#DC2626') : '#6B7280';
+    const rItems = [];
+    if(sharpe1y !== undefined)    rItems.push('<span style="font-size:11px"><span style="color:#6B7280">Sharpe: </span><span style="color:'+shCol+';font-weight:700">'+sharpe1y+'</span></span>');
+    if(sortino1y !== undefined)   rItems.push('<span style="font-size:11px"><span style="color:#6B7280">Sortino: </span><span style="color:#D1D5DB">'+sortino1y+'</span></span>');
+    if(maxdd1y !== undefined)     rItems.push('<span style="font-size:11px"><span style="color:#6B7280">MaxDD: </span><span style="color:'+ddCol+';font-weight:700">'+maxdd1y+'%</span></span>');
+    if(betaVal !== null && betaVal !== undefined) rItems.push('<span style="font-size:11px"><span style="color:#6B7280">β: </span><span style="color:'+bCol+';font-weight:600">'+betaVal+'</span></span>');
+    if(var95 !== undefined)       rItems.push('<span style="font-size:11px"><span style="color:#6B7280">VaR 95%: </span><span style="color:#6B7280">'+var95+'%</span></span>');
+    if(rItems.length > 0){
+      riskHtml = '<div style="margin-top:10px;padding:8px 12px;background:#0A0F1A;border:1px solid #1F2937;border-radius:5px">'
+        + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px">Rischio (1 anno)</div>'
+        + '<div style="display:flex;gap:14px;flex-wrap:wrap">'+rItems.join('')+'</div></div>';
+    }
+  }
+
+  // ── Fondamentali (dividendo + qualità) ──────────────────────────────────────
+  const fd = (s.fundamental_detail && s.fundamental_detail.metrics) || {};
+  const divYieldFd = fd.div_yield;
+  const payoutFd   = fd.payout;
+  const roeFd      = fd.roe;
+  const roicFd     = fd.roic;
+  const pFcfFd     = fd.p_fcf;
+  const grossFd    = fd.gross_margin;
+  const divGrowFd  = fd.div_growth;
+  let fundHtml = '';
+  {
+    const fItems = [];
+    if(divYieldFd && divYieldFd > 0){
+      const dyPct = (divYieldFd * 100).toFixed(1);
+      const dyCol = divYieldFd * 100 >= 3 ? '#16A34A' : '#F59E0B';
+      fItems.push('<span><span style="color:#6B7280">Dividendo: </span><span style="color:'+dyCol+';font-weight:700">'+dyPct+'%</span></span>');
+    }
+    if(payoutFd !== null && payoutFd !== undefined && payoutFd > 0){
+      const pyCol = payoutFd < 0.70 ? '#16A34A' : payoutFd < 0.90 ? '#F59E0B' : '#DC2626';
+      fItems.push('<span><span style="color:#6B7280">Payout: </span><span style="color:'+pyCol+'">'+( payoutFd * 100).toFixed(0)+'%</span></span>');
+    }
+    if(divGrowFd !== null && divGrowFd !== undefined){
+      const dgCol = divGrowFd > 0.03 ? '#16A34A' : divGrowFd >= 0 ? '#F59E0B' : '#DC2626';
+      fItems.push('<span><span style="color:#6B7280">Crescita div: </span><span style="color:'+dgCol+'">'+(divGrowFd >= 0 ? '+' : '')+(divGrowFd * 100).toFixed(1)+'%/a</span></span>');
+    }
+    if(pFcfFd !== null && pFcfFd !== undefined){
+      const pfcfCol = pFcfFd > 0 && pFcfFd < 20 ? '#16A34A' : pFcfFd > 40 ? '#DC2626' : '#F59E0B';
+      fItems.push('<span><span style="color:#6B7280">P/FCF: </span><span style="color:'+pfcfCol+'">'+pFcfFd.toFixed(1)+'×</span></span>');
+    }
+    if(roeFd !== null && roeFd !== undefined){
+      const roeCol = roeFd > 0.15 ? '#16A34A' : roeFd > 0.08 ? '#F59E0B' : '#DC2626';
+      fItems.push('<span><span style="color:#6B7280">ROE: </span><span style="color:'+roeCol+'">'+( roeFd * 100).toFixed(0)+'%</span></span>');
+    }
+    if(roicFd !== null && roicFd !== undefined){
+      const roicCol = roicFd > 0.12 ? '#16A34A' : roicFd > 0.06 ? '#F59E0B' : '#DC2626';
+      fItems.push('<span><span style="color:#6B7280">ROIC: </span><span style="color:'+roicCol+'">'+( roicFd * 100).toFixed(0)+'%</span></span>');
+    }
+    if(grossFd !== null && grossFd !== undefined){
+      fItems.push('<span><span style="color:#6B7280">Margine lordo: </span><span style="color:#D1D5DB">'+( grossFd * 100).toFixed(0)+'%</span></span>');
+    }
+    if(fItems.length > 0){
+      fundHtml = '<div style="margin-top:10px;padding:8px 12px;background:#0A0F1A;border:1px solid #1F2937;border-radius:5px">'
+        + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px">Fondamentali</div>'
+        + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px">'+fItems.join('')+'</div></div>';
+    }
+  }
+
+  // Dividend yield in header (se disponibile)
+  const divYieldHdr = (divYieldFd && divYieldFd > 0)
+    ? '<div style="font-size:10px;color:#16A34A;font-weight:600;margin-top:2px">Div: '+(divYieldFd*100).toFixed(1)+'%</div>'
+    : '';
+
   return '<div class="sig-card '+s.action.toLowerCase()+'">'
     // Header
     + '<div class="sig-card-hdr">'
@@ -813,6 +890,7 @@ function buildCard(s){
     + '<div style="text-align:right;flex-shrink:0;margin-left:16px">'
     + (s.price?'<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+curr+' '+s.price+'</div>':'')
     + '<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:'+col+';font-weight:700">'+techScore+'</span></div>'
+    + divYieldHdr
     + '</div></div>'
     // Conf bar
     + '<div style="padding:8px 18px;background:#0D1420;border-bottom:1px solid #1F2937">'
@@ -822,7 +900,7 @@ function buildCard(s){
     + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
     + '</div>'
     // Body
-    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+indHtml+secHtml+instHtml+smHtml+aiHtml+newsHtml+'</div>'
+    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+fundHtml+riskHtml+indHtml+secHtml+instHtml+smHtml+aiHtml+newsHtml+'</div>'
     + '</div>';
 }
 

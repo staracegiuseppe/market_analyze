@@ -30,6 +30,31 @@ YAHOO_CHART_URL2= "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
 
 _SESSION: Optional[requests.Session] = None
 
+# ── Benchmark cache per Beta (^GSPC, TTL 4 ore) ───────────────────────────────
+_BENCH_CACHE: Dict = {"returns": None, "ts": 0}
+_BENCH_TTL = 4 * 3600
+
+def _get_benchmark_returns() -> Optional[pd.Series]:
+    """Ritorna le daily returns di ^GSPC (1y) dalla cache o fetcha di nuovo."""
+    global _BENCH_CACHE
+    if _BENCH_CACHE["returns"] is not None and (time.time() - _BENCH_CACHE["ts"]) < _BENCH_TTL:
+        return _BENCH_CACHE["returns"]
+    try:
+        raw = _yahoo_fetch_raw("^GSPC", range_="1y")
+        if raw is None:
+            return None
+        df = _raw_to_dataframe(raw, "^GSPC")
+        if df is None or len(df) < 30:
+            return None
+        ret = df["Close"].pct_change().dropna()
+        _BENCH_CACHE = {"returns": ret, "ts": time.time()}
+        log.info(f"[MARKET] Benchmark ^GSPC aggiornato: {len(ret)} barre")
+        return ret
+    except Exception as e:
+        log.warning(f"[MARKET] Benchmark ^GSPC fetch: {e}")
+        return None
+
+
 def _get_session() -> requests.Session:
     """Session con headers browser — bypassa proxy HA Docker."""
     global _SESSION
@@ -418,6 +443,46 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
             adx_val   = adx_data.get("adx", 0),
         )
 
+        # ── Risk metrics (Sharpe, Sortino, MaxDD, VaR, Beta) ─────────────────
+        risk_metrics = {}
+        try:
+            ret_s   = cl.pct_change().dropna()
+            rf_d    = 0.04 / 252  # risk-free giornaliero (4% annuo)
+            excess  = ret_s - rf_d
+            std_all = float(ret_s.std())
+
+            if std_all > 0:
+                sharpe = round(float(excess.mean() / std_all * np.sqrt(252)), 2)
+            else:
+                sharpe = 0.0
+
+            down = ret_s[ret_s < 0]
+            if len(down) > 1:
+                sortino = round(float(excess.mean() / down.std() * np.sqrt(252)), 2)
+            else:
+                sortino = 0.0
+
+            max_dd  = round(float((cl / cl.cummax() - 1).min() * 100), 1)
+            var_95  = round(float(np.percentile(ret_s, 5) * 100), 2)
+
+            # Beta vs ^GSPC
+            beta = None
+            bench = _get_benchmark_returns()
+            if bench is not None:
+                aligned_a, aligned_b = ret_s.align(bench, join="inner")
+                if len(aligned_a) >= 30 and float(aligned_b.var()) > 0:
+                    beta = round(float(aligned_a.cov(aligned_b) / aligned_b.var()), 2)
+
+            risk_metrics = {
+                "sharpe_1y":          sharpe,
+                "sortino_1y":         sortino,
+                "max_drawdown_1y_pct":max_dd,
+                "var_95_1d_pct":      var_95,
+                "beta":               beta,
+            }
+        except Exception as re:
+            log.debug(f"[MARKET] {symbol}: risk metrics error — {re}")
+
         ind = {
             "symbol":           symbol,
             "last_price":       last,
@@ -441,6 +506,7 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
             "rsi_divergence":   _rsi_divergence(cl),
             "bb_squeeze_data":  squeeze,
             "bounce_probability": bounce_prob,
+            "risk_metrics":     risk_metrics,
             "source":           "yahoo_direct",
         }
         log.info(
