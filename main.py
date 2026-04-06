@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(n
 log = logging.getLogger("main")
 
 
-# â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Config â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 def load_options() -> dict:
     p = Path("/data/options.json")
     if p.exists():
@@ -69,13 +69,13 @@ BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
 PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
 ASSETS = load_assets()
-log.info(f”[STARTUP] {len(ASSETS)} assets loaded”)
+log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
 
 def _load_all_assets() -> list:
-    “””Carica TUTTI gli asset (inclusi disabled) per la gestione CRUD.”””
+    """Carica TUTTI gli asset (inclusi disabled) per la gestione CRUD."""
     p = assets_json_path()
     if p.exists():
-        return json.load(open(p, encoding=”utf-8”))
+        return json.load(open(p, encoding="utf-8"))
     return []
 
 # Modello Pydantic per asset
@@ -92,7 +92,7 @@ class AssetModel(BaseModel):
     enabled:    bool = True
     note:       str = ""
 
-# â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 state = {
     "last_run":    None,
     "next_run":    None,
@@ -109,7 +109,7 @@ state = {
 _backtest_cache: dict = {}  # {symbol: result}
 
 
-# â”€â”€ Scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Scheduler â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 def run_scan():
     if state["running"]:
         log.warning("[SCHEDULER] already running, skip")
@@ -126,7 +126,7 @@ def run_scan():
     tech = fetch_all(symbols)
     real_count = sum(1 for v in tech.values() if v is not None)
     log.info(f"[STEP 1/4 MARKET] {real_count}/{len(symbols)} OK | "
-             + " ".join(f"{s}{'âœ“' if tech.get(s) else 'âœ—'}" for s in symbols[:10]))
+             + " ".join(f"{s}{'OK' if tech.get(s) else 'NO'}" for s in symbols[:10]))
 
     # Step 2a: Macro layer (FRED + ECB + EIA + Yahoo)
     macro_ctx = None
@@ -157,7 +157,7 @@ def run_scan():
         except Exception as e:
             log.error(f"[STEP 2b/5 FUND] errore: {e}")
     else:
-        log.info("[STEP 2b/5 FUND] Disabilitato â€” configura fmp_api_key per attivare")
+        log.info("[STEP 2b/5 FUND] Disabilitato - configura fmp_api_key per attivare")
 
     # Step 2c: Sector rotation (dati reali ETF settoriali)
     sector_ctx = {}
@@ -188,7 +188,7 @@ def run_scan():
         except Exception as e:
             log.error(f"[STEP 2d/5 INST] errore: {e}")
     elif not FMP_KEY:
-        log.info("[STEP 2d/5 INST] Disabilitato â€” configura fmp_api_key")
+        log.info("[STEP 2d/5 INST] Disabilitato - configura fmp_api_key")
 
     # Step 2e: Technical signals (base layer)
     log.info(f"[STEP 2e/5 QUANT] running signal scanner...")
@@ -213,9 +213,9 @@ def run_scan():
                  f"entry={s['entry']} SL={s['stop_loss']} TP={s['take_profit']} RR=1:{s['risk_reward']}")
 
     # Step 3: AI enrichment (top 3 only)
-    # â”€â”€ Step 3: AI enrichment â€” SOLO in finestra 08:00-23:30 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Step 3: AI enrichment - SOLO in finestra 08:00-23:30 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if not is_trading_hours():
-        log.info("[STEP 3/4 AI] SKIPPED â€” fuori finestra operativa (08:00-23:30) â€” nessun credito AI consumato")
+        log.info("[STEP 3/4 AI] SKIPPED - fuori finestra operativa (08:00-23:30) - nessun credito AI consumato")
     elif active and (CLAUDE_KEY or PPLX_KEY):
         log.info(f"[STEP 3/4 AI] enriching top-{min(3,len(active))} signals...")
         signals = apply_ai_enrichment(signals, CLAUDE_KEY, PPLX_KEY)
@@ -229,9 +229,9 @@ def run_scan():
     state.update({"signals": signals, "tech_data": tech,
                   "last_run": run_ts, "next_run": next_ts, "running": False})
 
-    # â”€â”€ Step 3.5: Smart Money â€” SOLO in finestra â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Step 3.5: Smart Money - SOLO in finestra â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if not is_trading_hours():
-        log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED â€” fuori finestra operativa")
+        log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED - fuori finestra operativa")
     elif CLAUDE_KEY:
         try:
             log.info("[STEP 3.5/4 SMART_MONEY] analisi istituzionale...")
@@ -247,9 +247,9 @@ def run_scan():
 
     # Step 4: email
     log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
-    # â”€â”€ Step 4: Email â€” SOLO in finestra â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Step 4: Email - SOLO in finestra â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if not is_trading_hours():
-        log.info("[STEP 4/4 EMAIL] SKIPPED â€” fuori finestra operativa (nessuna email notturna)")
+        log.info("[STEP 4/4 EMAIL] SKIPPED - fuori finestra operativa (nessuna email notturna)")
     elif OPTIONS.get("email_enabled"):
         try:
             # Adapt signals list for mailer (expects 'results' format)
@@ -278,7 +278,7 @@ def _scheduler_loop():
         run_scan()
         last_run_at = datetime.utcnow()
     else:
-        log.info("[SCHEDULER] Fuori finestra operativa â€” prima scansione posticipata alle 08:00")
+        log.info("[SCHEDULER] Fuori finestra operativa - prima scansione posticipata alle 08:00")
 
     while True:
         time.sleep(60)  # controlla ogni minuto
@@ -298,7 +298,7 @@ def _scheduler_loop():
             last_run_at = datetime.utcnow()
 
 
-# â”€â”€ FastAPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ FastAPI â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 app = FastAPI(title="Multi-Market Scanner", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -316,7 +316,7 @@ async def idx():   return await _html()
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
     """Catch-all: qualsiasi path sconosciuto serve index.html (SPA pattern)."""
-    # Le API restituiscono 404 JSON normale â€” solo le route non-API servono il frontend
+    # Le API restituiscono 404 JSON normale - solo le route non-API servono il frontend
     if request.url.path.startswith("/api/"):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Not Found"}, status_code=404)
@@ -423,7 +423,7 @@ async def lookup_asset_by_isin(isin: str):
     Usa OpenFIGI (gratuito) + Yahoo Finance per validare il simbolo.
     """
     if not isin or len(isin.strip()) != 12:
-        raise HTTPException(400, "ISIN non valido — deve essere esattamente 12 caratteri")
+        raise HTTPException(400, "ISIN non valido - deve essere esattamente 12 caratteri")
     result = lookup_isin(isin.strip().upper())
     if result is None:
         raise HTTPException(404, f"Impossibile risolvere {isin}")
@@ -495,7 +495,7 @@ async def get_institutional(symbol: str):
     if sym in inst_db:
         return inst_db[sym]
     if not FMP_KEY:
-        raise HTTPException(400, "FMP API key non configurata â€” configura fmp_api_key nel config add-on")
+        raise HTTPException(400, "FMP API key non configurata - configura fmp_api_key nel config add-on")
     # Fetch puntuale
     asset = next((a for a in ASSETS if a["symbol"].upper() == sym), {"symbol": sym, "asset_type": "stock"})
     from institutional_layer import fetch_institutional_score
