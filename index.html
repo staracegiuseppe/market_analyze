@@ -1322,7 +1322,27 @@ async function testEmail(){
 // ════════════════════════════════════════════════════════════
 const SM_ACT_COL  = {Accumulate:'#16A34A',Monitor:'#F59E0B',Avoid:'#DC2626'};
 const SM_TECH_COL = {Bullish:'#16A34A',Neutral:'#F59E0B',Weak:'#DC2626'};
-const SM_SIG_ICON = {'New Position':'🆕','Increase':'📈','Convergence':'🔄','Insider Buy':'👔'};
+const SM_SIG_ICON = {'New Position':'🆕','Increase':'📈','Convergence':'🔄','Insider Buy':'👔','Discovery':'🔭'};
+
+// Traduzione Smart Money → Italiano
+const SM_TRAD = {
+  signal_type: {
+    'New Position':'Nuova Posizione','Increase':'Aumento','Convergence':'Convergenza',
+    'Insider Buy':'Acquisto Insider','Discovery':'Scoperta',
+  },
+  macro_alignment: {
+    'TAILWIND':'Vento favorevole','NEUTRAL':'Neutrale','HEADWIND':'Vento contrario','CONTRARIAN':'Contrarian',
+  },
+  technical_status: {
+    'Bullish':'Rialzista','Neutral':'Neutrale','Weak':'Debole',
+  },
+  action: {
+    'Accumulate':'Accumulare','Monitor':'Monitorare','Avoid':'Evitare',
+  },
+};
+function smTrad(field, value){
+  return SM_TRAD[field]?.[value] || value;
+}
 
 function buildSMCard(opp){
   const ac  = SM_ACT_COL[opp.action]   || '#6B7280';
@@ -1337,7 +1357,7 @@ function buildSMCard(opp){
     + '<div>'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
     + '<span>'+ico+'</span>'
-    + '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:'+ac+'22;color:'+ac+';border:1px solid '+ac+'44">'+opp.signal_type+'</span>'
+    + '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:'+ac+'22;color:'+ac+';border:1px solid '+ac+'44">'+smTrad('signal_type',opp.signal_type)+'</span>'
     + '</div>'
     + '<div style="font-size:18px;font-weight:800;color:#F9FAFB">'+opp.company+'</div>'
     + '<div style="font-size:12px;color:#9CA3AF;margin-top:2px">'+opp.ticker+' · '+opp.sector+'</div>'
@@ -1347,14 +1367,14 @@ function buildSMCard(opp){
     + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:3px">SCORE</div>'
     + '<div style="font-size:32px;font-weight:900;color:'+scc+';font-family:monospace;line-height:1">'+sc+'</div>'
     + '<div style="height:4px;background:#1F2937;border-radius:2px;margin-top:5px;width:60px"><div style="height:4px;width:'+sc+'%;background:'+scc+';border-radius:2px"></div></div>'
-    + '<div style="margin-top:8px;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:'+ac+'22;color:'+ac+';border:1px solid '+ac+'44">'+opp.action+'</div>'
+    + '<div style="margin-top:8px;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:'+ac+'22;color:'+ac+';border:1px solid '+ac+'44">'+smTrad('action',opp.action)+'</div>'
     + '</div></div>'
     + '<div class="sm-card-body">'
     + '<div style="margin-bottom:12px"><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px">Perché questo segnale conta</div>'
     + '<div style="font-size:12px;color:#D1D5DB;line-height:1.7">'+(opp.why_matters||'')+'</div></div>'
     + '<div class="sm-info-grid">'
     + '<div class="sm-info-box"><div class="sm-info-lbl">FONDAMENTALI</div><div style="font-size:11px;color:#9CA3AF;line-height:1.6">'+(opp.fundamental_snapshot||'N/A')+'</div></div>'
-    + '<div class="sm-info-box"><div class="sm-info-lbl">STATO TECNICO</div><div style="font-size:14px;font-weight:700;color:'+tc+'">'+(opp.technical_status||'Neutral')+'</div></div>'
+    + '<div class="sm-info-box"><div class="sm-info-lbl">STATO TECNICO</div><div style="font-size:14px;font-weight:700;color:'+tc+'">'+smTrad('technical_status',opp.technical_status||'Neutral')+'</div></div>'
     + '<div class="sm-info-box"><div class="sm-info-lbl">RISCHI</div><div style="font-size:11px;color:#9CA3AF;line-height:1.6">'+(opp.risk_summary||'N/A')+'</div></div>'
     + '</div></div></div>';
 }
