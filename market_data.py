@@ -475,6 +475,211 @@ def fetch_all(symbols: List[str], period: str = "1y") -> Dict[str, Optional[Dict
     return results
 
 
+# ── ISIN Lookup ───────────────────────────────────────────────────────────────
+
+# OpenFIGI exchCode → (Yahoo suffix, market, default_currency, exchange_label)
+_EXCH_MAP: Dict[str, tuple] = {
+    "IM": (".MI",  "IT", "EUR", "BIT"),       # Italy Borsa
+    "GY": (".DE",  "EU", "EUR", "XETRA"),     # Germany Xetra
+    "GF": (".F",   "EU", "EUR", "FRA"),       # Frankfurt
+    "FP": (".PA",  "EU", "EUR", "EPA"),       # France Euronext Paris
+    "NA": (".AS",  "EU", "EUR", "AMS"),       # Netherlands
+    "SM": (".MC",  "EU", "EUR", "BME"),       # Spain Madrid
+    "LN": (".L",   "EU", "GBP", "LSE"),       # UK London
+    "SW": (".SW",  "EU", "CHF", "SIX"),       # Switzerland
+    "SS": (".ST",  "EU", "SEK", "STO"),       # Sweden
+    "NO": (".OL",  "EU", "NOK", "OSL"),       # Norway
+    "DC": (".CO",  "EU", "DKK", "CPH"),       # Denmark
+    "HE": (".HE",  "EU", "EUR", "HSE"),       # Finland
+    "BB": (".BR",  "EU", "EUR", "EBR"),       # Belgium
+    "PL": (".LS",  "EU", "EUR", "ELI"),       # Portugal
+    "AT": (".VI",  "EU", "EUR", "VIE"),       # Austria
+    "UQ": ("",     "US", "USD", "NASDAQ"),    # NASDAQ
+    "UN": ("",     "US", "USD", "NYSE"),      # NYSE
+    "UP": ("",     "US", "USD", "NYSEARCA"),  # NYSE Arca (ETF)
+    "UR": ("",     "US", "USD", "BATS"),      # BATS
+    "US": ("",     "US", "USD", ""),          # US generic
+    "JT": (".T",   "ASIA","JPY","TSE"),       # Japan
+    "AX": (".AX",  "ASIA","AUD","ASX"),       # Australia
+}
+
+_SECTYPE_MAP = {
+    "Common Stock":          "stock",
+    "Preferred Stock":       "stock",
+    "Depositary Receipt":    "stock",
+    "Open-End Fund":         "etf",
+    "Exchange Traded Fund":  "etf",
+    "ETP":                   "etf",
+    "ETF":                   "etf",
+    "Index":                 "index",
+    "Index Basket":          "index",
+}
+
+_OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
+
+
+def _openfigi_lookup(isin: str) -> Optional[List[Dict]]:
+    """
+    Query OpenFIGI to resolve ISIN → list of matching instruments.
+    Free tier: 25 req/min, no API key required.
+    """
+    try:
+        session = _get_session()
+        resp = session.post(
+            _OPENFIGI_URL,
+            json=[{"idType": "ID_ISIN", "idValue": isin.strip().upper()}],
+            headers={"Content-Type": "application/json"},
+            timeout=12,
+        )
+        log.info(f"[ISIN] OpenFIGI {isin}: HTTP {resp.status_code}")
+        if resp.status_code == 200:
+            results = resp.json()
+            if results and isinstance(results, list) and results[0].get("data"):
+                return results[0]["data"]
+        elif resp.status_code == 429:
+            log.warning("[ISIN] OpenFIGI rate limit — riprova tra qualche secondo")
+        else:
+            log.warning(f"[ISIN] OpenFIGI errore: {resp.status_code} {resp.text[:120]}")
+    except Exception as e:
+        log.error(f"[ISIN] OpenFIGI exception: {e}")
+    return None
+
+
+def _yahoo_quote(symbol: str) -> Optional[Dict]:
+    """
+    Fetch Yahoo Finance quote metadata for a symbol.
+    Returns: longName, shortName, currency, quoteType, exchangeName
+    """
+    try:
+        session = _get_session()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        r = session.get(url, params={"interval": "1d", "range": "5d"}, timeout=12)
+        if r.status_code == 200:
+            data = r.json()
+            result = data.get("chart", {}).get("result")
+            if result and len(result) > 0:
+                meta = result[0].get("meta", {})
+                log.info(f"[ISIN] Yahoo quote {symbol}: {meta.get('longName', meta.get('shortName', '?'))}")
+                return meta
+        log.warning(f"[ISIN] Yahoo quote {symbol}: HTTP {r.status_code}")
+    except Exception as e:
+        log.error(f"[ISIN] Yahoo quote {symbol}: {e}")
+    return None
+
+
+def lookup_isin(isin: str) -> Optional[Dict]:
+    """
+    Lookup all asset metadata from ISIN only.
+
+    Flow:
+    1. OpenFIGI → ticker + exchCode + security type + name
+    2. Build Yahoo Finance symbol (ticker + exchange suffix)
+    3. Validate with Yahoo Finance quote → get full name, currency confirmed
+    4. Return complete asset dict ready to save.
+
+    Returns None if ISIN cannot be resolved.
+    """
+    isin = isin.strip().upper()
+    if len(isin) != 12:
+        return {"error": f"ISIN non valido: deve essere 12 caratteri (ricevuto: {len(isin)})"}
+
+    log.info(f"[ISIN] Lookup {isin}...")
+
+    # Step 1: OpenFIGI
+    figi_results = _openfigi_lookup(isin)
+    if not figi_results:
+        return {"error": f"ISIN {isin} non trovato su OpenFIGI. Verifica che sia corretto."}
+
+    # Priorità: equity / common stock su listino principale
+    def _rank(item):
+        sec  = item.get("securityType", "")
+        exch = item.get("exchCode", "")
+        # Preferisci azioni comuni su borse principali
+        score = 0
+        if "Common Stock" in sec:    score += 10
+        if exch in _EXCH_MAP:        score += 5
+        if exch in ("IM", "UQ", "UN", "GY", "FP", "NA", "LN"): score += 3
+        return score
+
+    best = sorted(figi_results, key=_rank, reverse=True)[0]
+    log.info(f"[ISIN] OpenFIGI best match: ticker={best.get('ticker')} "
+             f"exch={best.get('exchCode')} type={best.get('securityType')} "
+             f"name={best.get('name')}")
+
+    ticker    = best.get("ticker", "").strip()
+    exch_code = best.get("exchCode", "").strip()
+    figi_name = best.get("name", "").strip().title()
+    sec_type  = best.get("securityType", "Common Stock")
+
+    if not ticker:
+        return {"error": f"OpenFIGI non ha restituito un ticker per {isin}"}
+
+    # Step 2: Build Yahoo Finance symbol
+    exch_info = _EXCH_MAP.get(exch_code, ("", "?", "USD", ""))
+    yf_suffix, market, currency, exchange_label = exch_info
+    yf_symbol = ticker + yf_suffix
+
+    log.info(f"[ISIN] Yahoo symbol: {yf_symbol} (suffix={yf_suffix})")
+
+    # Step 3: Validate with Yahoo Finance
+    meta    = _yahoo_quote(yf_symbol)
+    if meta is None:
+        # Try without suffix as fallback
+        if yf_suffix:
+            meta = _yahoo_quote(ticker)
+            if meta:
+                yf_symbol = ticker
+                log.info(f"[ISIN] Fallback symbol (no suffix): {yf_symbol}")
+
+    # Build final asset dict
+    full_name  = ""
+    short_name = figi_name
+    if meta:
+        full_name  = meta.get("longName", "") or meta.get("shortName", "")
+        short_name = meta.get("shortName", "") or figi_name
+        # Prefer Yahoo currency over OpenFIGI default
+        if meta.get("currency"):
+            currency = meta["currency"].upper()
+        # Refine asset_type from Yahoo quoteType
+        qt = meta.get("quoteType", "").upper()
+        if qt == "ETF":
+            sec_type = "ETF"
+        elif qt == "EQUITY":
+            sec_type = "Common Stock"
+        elif qt == "INDEX":
+            sec_type = "Index"
+        elif qt == "MUTUALFUND":
+            sec_type = "Open-End Fund"
+        # Refine exchange label
+        if meta.get("exchangeName"):
+            exchange_label = meta["exchangeName"]
+
+    asset_type = _SECTYPE_MAP.get(sec_type, "stock")
+
+    result = {
+        "symbol":     yf_symbol,
+        "name":       short_name or figi_name,
+        "full_name":  full_name or short_name or figi_name,
+        "isin":       isin,
+        "market":     market,
+        "country":    market,
+        "asset_type": asset_type,
+        "currency":   currency,
+        "exchange":   exchange_label,
+        "enabled":    True,
+        "note":       "",
+        # Extra debug info
+        "_figi_name":  figi_name,
+        "_exch_code":  exch_code,
+        "_yf_validated": meta is not None,
+    }
+
+    log.info(f"[ISIN] ✓ {isin} → {yf_symbol} | {result['name']} | "
+             f"{market} {currency} {exchange_label} | type={asset_type} | "
+             f"yahoo={'OK' if meta else 'NOT VALIDATED'}")
+    return result
+
+
 def load_assets(path: str = "assets.json") -> List[Dict]:
     candidates = [
         Path(path),

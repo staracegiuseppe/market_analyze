@@ -220,12 +220,47 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   <!-- Form aggiungi/modifica (nascosto di default) -->
   <div id="asset-form-box" style="display:none;background:#111827;border:1px solid #1F2937;border-radius:10px;padding:18px;margin-bottom:16px">
     <div style="font-size:13px;font-weight:700;color:#F9FAFB;margin-bottom:14px" id="asset-form-title">Aggiungi nuovo asset</div>
+
+    <!-- ── ISIN lookup (solo in modalità aggiungi) ── -->
+    <div id="af-isin-lookup-row" style="margin-bottom:14px;padding:12px 14px;background:#0D1420;border:1px solid #253050;border-radius:8px">
+      <div style="font-size:10px;color:#3D8EF0;font-weight:700;letter-spacing:.08em;margin-bottom:8px">🔍 RICERCA AUTOMATICA DA ISIN</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px">
+          <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ISIN *</div>
+          <input id="af-isin" type="text" placeholder="es. IT0003132476"
+            style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px;outline:none;font-family:monospace;letter-spacing:.06em"
+            oninput="this.value=this.value.toUpperCase()"
+            onkeydown="if(event.key==='Enter') lookupISIN()"/>
+        </div>
+        <button id="af-lookup-btn" class="btn" style="background:#3D8EF0;border-color:#3D8EF0;color:#fff;padding:8px 16px;font-size:12px;flex-shrink:0" onclick="lookupISIN()">
+          🔍 Cerca
+        </button>
+        <div id="af-lookup-spin" class="spin" style="display:none;margin-bottom:6px"></div>
+      </div>
+      <!-- Result preview -->
+      <div id="af-lookup-result" style="display:none;margin-top:10px;padding:8px 12px;background:#111827;border-radius:6px;border:1px solid #253050">
+        <div id="af-lookup-result-inner" style="font-size:12px;color:#D0DFF8"></div>
+      </div>
+      <div style="font-size:9px;color:#6B7280;margin-top:8px">
+        Inserisci l'ISIN a 12 caratteri e clicca <b>Cerca</b> — tutti i campi verranno compilati automaticamente.
+        Il simbolo Yahoo Finance e i dati vengono recuperati da <b>OpenFIGI</b> + <b>Yahoo Finance</b>.
+      </div>
+    </div>
+
+    <!-- ── Separatore ── -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="flex:1;height:1px;background:#1F2937"></div>
+      <div style="font-size:9px;color:#374151;text-transform:uppercase;letter-spacing:.1em">oppure compila manualmente</div>
+      <div style="flex:1;height:1px;background:#1F2937"></div>
+    </div>
+
+    <!-- ── Campi form ── -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
       <div>
         <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">SIMBOLO YAHOO *</div>
         <input id="af-symbol" type="text" placeholder="es. ENI.MI, AAPL, SPY"
           style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none;font-family:monospace"/>
-        <div style="font-size:9px;color:#6B7280;margin-top:3px">Simbolo esatto come su Yahoo Finance</div>
+        <div style="font-size:9px;color:#6B7280;margin-top:3px">Simbolo come su Yahoo Finance</div>
       </div>
       <div>
         <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">NOME BREVE *</div>
@@ -238,18 +273,14 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
           style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
-      <div>
-        <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ISIN</div>
-        <input id="af-isin" type="text" placeholder="es. IT0003132476"
-          style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:11px;outline:none;font-family:monospace"/>
-      </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
       <div>
         <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">MERCATO</div>
         <select id="af-market" style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none">
           <option value="IT">🇮🇹 Italia</option>
           <option value="EU">🇪🇺 Europa</option>
           <option value="US" selected>🇺🇸 USA</option>
+          <option value="ASIA">🌏 Asia</option>
         </select>
       </div>
       <div>
@@ -267,6 +298,10 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
           <option value="USD" selected>USD</option>
           <option value="GBP">GBP</option>
           <option value="CHF">CHF</option>
+          <option value="SEK">SEK</option>
+          <option value="NOK">NOK</option>
+          <option value="JPY">JPY</option>
+          <option value="AUD">AUD</option>
         </select>
       </div>
       <div>
@@ -275,10 +310,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
           style="width:100%;background:#0D1420;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
       </div>
     </div>
-    <div style="font-size:9px;color:#6B7280;margin-bottom:12px">
-      ℹ Verifica il simbolo su <a href="https://finance.yahoo.com" target="_blank" style="color:#3D8EF0">finance.yahoo.com</a>
-      prima di aggiungere. Simboli italiani terminano in .MI (es. ENI.MI), tedeschi in .DE, olandesi in .AS.
-    </div>
+
     <div style="display:flex;gap:10px;align-items:center">
       <button class="btn" style="background:#16A34A;border-color:#16A34A;color:#fff" onclick="saveAsset()">💾 Salva</button>
       <button class="btn" onclick="closeAssetForm()">✕ Annulla</button>
@@ -459,6 +491,7 @@ function fmtTime(t){
   catch(e){ return t ? String(t).substring(11,16) : '—'; }
 }
 function safe(v, fallback){ return (v !== undefined && v !== null) ? v : fallback; }
+function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ════════════════════════════════════════════════════════════
 //  STATE
@@ -952,14 +985,70 @@ async function loadAssets(){
   }
 }
 
+// ── ISIN lookup ───────────────────────────────────────────────────────────────
+async function lookupISIN(){
+  const isin = document.getElementById('af-isin').value.trim().toUpperCase();
+  if(isin.length !== 12){
+    const res = document.getElementById('af-lookup-result');
+    const inner = document.getElementById('af-lookup-result-inner');
+    inner.innerHTML = '<span style="color:#DC2626">⚠ ISIN deve essere esattamente 12 caratteri (es. IT0003132476)</span>';
+    res.style.display = 'block';
+    return;
+  }
+  const btn  = document.getElementById('af-lookup-btn');
+  const spin = document.getElementById('af-lookup-spin');
+  const res  = document.getElementById('af-lookup-result');
+  const inner = document.getElementById('af-lookup-result-inner');
+  btn.disabled = true;
+  btn.textContent = 'Ricerca…';
+  spin.style.display = 'inline-block';
+  res.style.display  = 'none';
+  inner.textContent  = '';
+  try{
+    const r = await fetch(api('/api/assets/lookup?isin='+encodeURIComponent(isin)));
+    const d = await r.json();
+    if(!r.ok){
+      inner.innerHTML = '<span style="color:#DC2626">⚠ '+escH(d.detail||'Impossibile risolvere l\'ISIN')+'</span>';
+      res.style.display = 'block';
+      return;
+    }
+    // Populate form fields
+    document.getElementById('af-symbol').value   = d.symbol   || '';
+    document.getElementById('af-name').value      = d.name     || '';
+    document.getElementById('af-fullname').value  = d.full_name|| d.name || '';
+    document.getElementById('af-isin').value      = isin;
+    if(d.market)    document.getElementById('af-market').value   = d.market;
+    if(d.asset_type) document.getElementById('af-type').value   = d.asset_type;
+    if(d.currency)  document.getElementById('af-currency').value = d.currency;
+    if(d.exchange)  document.getElementById('af-exchange').value = d.exchange;
+    // Show summary
+    inner.innerHTML =
+      '<span style="color:#18B85A;font-weight:700">✓ Trovato</span>'
+      +' — <b>'+escH(d.symbol)+'</b>'
+      +(d.name ? ' · '+escH(d.name) : '')
+      +(d.exchange ? ' · <span style="color:#6880A0">'+escH(d.exchange)+'</span>' : '')
+      +(d.currency ? ' · <span style="color:#6880A0">'+escH(d.currency)+'</span>' : '')
+      +'<br><span style="font-size:10px;color:#6880A0">Campi compilati — verifica e salva.</span>';
+    res.style.display = 'block';
+  }catch(e){
+    inner.innerHTML = '<span style="color:#DC2626">⚠ Errore di rete: '+escH(e.message)+'</span>';
+    res.style.display = 'block';
+  }finally{
+    spin.style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = '🔍 Cerca';
+  }
+}
+
 // ── Form aggiungi / modifica ──────────────────────────────────────────────────
 function openAddForm(){
   _editSymbol = null;
   document.getElementById('asset-form-title').textContent = 'Aggiungi nuovo asset';
   document.getElementById('af-symbol').disabled = false;
   _clearForm();
+  document.getElementById('af-isin-lookup-row').style.display = 'block';
   document.getElementById('asset-form-box').style.display = 'block';
-  document.getElementById('af-symbol').focus();
+  document.getElementById('af-isin').focus();
 }
 
 function openEditForm(sym){
@@ -967,8 +1056,9 @@ function openEditForm(sym){
   if(!a) return;
   _editSymbol = sym;
   document.getElementById('asset-form-title').textContent = 'Modifica asset: ' + sym;
+  document.getElementById('af-isin-lookup-row').style.display = 'none';
   document.getElementById('af-symbol').value    = a.symbol || '';
-  document.getElementById('af-symbol').disabled = true; // simbolo non modificabile
+  document.getElementById('af-symbol').disabled = true;
   document.getElementById('af-name').value      = a.name || '';
   document.getElementById('af-fullname').value  = a.full_name || '';
   document.getElementById('af-isin').value      = a.isin || '';
@@ -995,6 +1085,11 @@ function _clearForm(){
   document.getElementById('af-type').value     = 'stock';
   document.getElementById('af-currency').value = 'USD';
   document.getElementById('af-msg').style.display = 'none';
+  document.getElementById('af-lookup-result').style.display = 'none';
+  document.getElementById('af-lookup-result-inner').textContent = '';
+  document.getElementById('af-lookup-spin').style.display = 'none';
+  const btn = document.getElementById('af-lookup-btn');
+  if(btn) { btn.disabled = false; btn.textContent = '🔍 Cerca'; }
 }
 
 function _showFormMsg(msg, ok){

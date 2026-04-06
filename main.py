@@ -9,7 +9,7 @@ from pydantic   import BaseModel
 from typing     import Optional, List
 import uvicorn
 
-from market_data            import fetch_all, load_assets
+from market_data            import fetch_all, load_assets, lookup_isin
 from smart_money            import run_smart_money_analysis, build_email_section
 from macro_layer            import fetch_macro_context
 from fundamental_layer      import fetch_all_fundamentals
@@ -426,6 +426,22 @@ async def delete_asset(symbol: str):
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
     log.info(f"[ASSETS] Eliminato: {sym}")
     return {"status": "deleted", "symbol": sym, "remaining": len(all_assets)}
+
+@app.get("/api/assets/lookup")
+async def lookup_asset_by_isin(isin: str):
+    """
+    Risolve un ISIN → dati asset completi (symbol Yahoo, nome, mercato, valuta, borsa).
+    Usa OpenFIGI (gratuito) + Yahoo Finance per validare il simbolo.
+    """
+    if not isin or len(isin.strip()) != 12:
+        raise HTTPException(400, "ISIN non valido — deve essere esattamente 12 caratteri")
+    result = lookup_isin(isin.strip().upper())
+    if result is None:
+        raise HTTPException(404, f"Impossibile risolvere {isin}")
+    if result.get("error"):
+        raise HTTPException(422, result["error"])
+    return result
+
 
 @app.get("/api/signals")
 async def get_signals(market: Optional[str] = None,
