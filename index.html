@@ -664,6 +664,12 @@ function buildCard(s){
   const qualTag = qual > 0
     ? ' <span style="font-size:10px;color:#C8A020" title="Qualità segnale '+qual+'/5">'+'★'.repeat(qual)+'☆'.repeat(5-qual)+'</span>'
     : '';
+  const mom = s.signal_momentum || {};
+  const momAdj = mom.adj || 0;
+  const momTag = (mom.history_runs > 0)
+    ? ' <span style="font-size:9px;color:'+(momAdj>0?'#16A34A':momAdj<0?'#DC2626':'#6B7280')+'" title="Momentum storico: trend '+(mom.score_trend||0)+' ×'+(mom.n_confirms||0)+' conferme">'
+      +(momAdj>0?'↑':momAdj<0?'↓':'→')+'×'+(mom.n_confirms||0)+'</span>'
+    : '';
 
   // Livelli
   let livelliHtml = '';
@@ -876,11 +882,28 @@ function buildCard(s){
     ? '<div style="font-size:10px;color:#16A34A;font-weight:600;margin-top:2px">Div: '+(divYieldFd*100).toFixed(1)+'%</div>'
     : '';
 
+  // Perplexity validation badge
+  const pv = s.perplexity_validation || {};
+  let pvHtml = '';
+  if(pv.validation){
+    const pvMap   = {CONFIRM:'#16A34A', CAUTION:'#F59E0B', OVERRIDE:'#DC2626'};
+    const pvIcon  = {CONFIRM:'✓', CAUTION:'⚠', OVERRIDE:'✗'};
+    const pvLabel = {CONFIRM:'CONFERMATO', CAUTION:'ATTENZIONE', OVERRIDE:'OVERRIDE'};
+    const pvCol   = pvMap[pv.validation] || '#6B7280';
+    pvHtml = '<div style="margin-top:10px;padding:8px 12px;background:#0A0F1A;border:1px solid '+pvCol+'44;border-radius:5px">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:'+(pv.note?'4':'0')+'px">'
+      + '<span style="font-size:9px;color:'+pvCol+';font-weight:700;letter-spacing:.1em">🔍 VALIDAZIONE PERPLEXITY</span>'
+      + '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:'+pvCol+'22;color:'+pvCol+';border:1px solid '+pvCol+'44;font-weight:700">'+(pvIcon[pv.validation]||'?')+' '+(pvLabel[pv.validation]||pv.validation)+'</span>'
+      + '</div>'
+      + (pv.note ? '<div style="font-size:11px;color:#9CA3AF;line-height:1.5">'+escH(pv.note)+'</div>' : '')
+      + '</div>';
+  }
+
   return '<div class="sig-card '+s.action.toLowerCase()+'">'
     // Header
     + '<div class="sig-card-hdr">'
     + '<div>'
-    + '<div style="font-size:18px;font-weight:800;color:'+col+'">'+act+actEff+aiTag+qualTag+'</div>'
+    + '<div style="font-size:18px;font-weight:800;color:'+col+'">'+act+actEff+aiTag+qualTag+momTag+'</div>'
     + '<div style="font-size:16px;font-weight:700;color:#F9FAFB;margin-top:2px">'+s.symbol
     + ' <span style="font-size:12px;font-weight:400;color:#9CA3AF">'+safe(s.full_name||s.name,'')+'</span></div>'
     + '<div style="font-size:10px;color:#6B7280;margin-top:3px">'+lblMkt(s.market)+' · '+lblTipo(s.asset_type)+(isin?' · ISIN: '+isin:'')+'</div>'
@@ -900,7 +923,7 @@ function buildCard(s){
     + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
     + '</div>'
     // Body
-    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+fundHtml+riskHtml+indHtml+secHtml+instHtml+smHtml+aiHtml+newsHtml+'</div>'
+    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+fundHtml+riskHtml+indHtml+secHtml+instHtml+smHtml+pvHtml+aiHtml+newsHtml+'</div>'
     + '</div>';
 }
 

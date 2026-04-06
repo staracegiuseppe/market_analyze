@@ -386,6 +386,130 @@ _ALIGN_IT   = {"TAILWIND": "Vento favorevole", "HEADWIND": "Vento contrario",
                 "CONTRARIAN": "Contrarian", "NEUTRAL": "Neutrale"}
 
 
+def validate_signals_with_perplexity(
+    signals: List[Dict],
+    history_by_symbol: Dict,
+    pplx_key: str,
+) -> Dict[str, Dict]:
+    """
+    Invia i segnali computati a Perplexity per validazione finale asset per asset.
+    Usa formato ultra-compatto per risparmiare token.
+    Return: {symbol: {"validation": "CONFIRM|CAUTION|OVERRIDE", "note": str}}
+    """
+    if not pplx_key:
+        return {}
+
+    # Filtra solo segnali attivi con dati reali
+    active = [
+        s for s in signals
+        if s.get("has_real_data") and s.get("action") not in ("HOLD", "NO_DATA")
+    ]
+    if not active:
+        return {}
+
+    lines = []
+    for s in active[:25]:  # cap a 25 asset per non sforare il contesto
+        sym    = s["symbol"]
+        action = s.get("action", "?")
+        cs     = s.get("composite_score", s.get("score", 0))
+        conf   = s.get("confidence", 0)
+        sub    = s.get("sub_scores", {})
+        ind    = s.get("indicators", {})
+        rm     = s.get("risk_metrics", {})
+        fd     = (s.get("fundamental_detail") or {}).get("metrics", {})
+
+        # Sub-scores compatti (solo non-zero)
+        sub_parts = [f"{k[:2].upper()}{v:+d}" for k, v in sub.items() if v != 0]
+        sub_str   = " ".join(sub_parts) if sub_parts else ""
+
+        # Indicatori tecnici chiave
+        ind_parts = []
+        if ind.get("rsi")      is not None: ind_parts.append(f"RSI={ind['rsi']}")
+        if ind.get("adx")      is not None: ind_parts.append(f"ADX={ind['adx']:.0f}")
+        if ind.get("ma_cross") is not None: ind_parts.append(f"MA={ind['ma_cross'][:5]}")
+        if ind.get("obv_trend"):             ind_parts.append(f"OBV={ind['obv_trend'][:4]}")
+        ind_str = " ".join(ind_parts)
+
+        # Risk metrics
+        risk_parts = []
+        if rm.get("sharpe_1y")          is not None: risk_parts.append(f"Sh={rm['sharpe_1y']}")
+        if rm.get("max_drawdown_1y_pct") is not None: risk_parts.append(f"DD={rm['max_drawdown_1y_pct']}%")
+        if rm.get("beta")                is not None: risk_parts.append(f"β={rm['beta']}")
+        risk_str = " ".join(risk_parts)
+
+        # Fundamentals (se disponibili)
+        fund_parts = []
+        if fd.get("div_yield") and fd["div_yield"] > 0:
+            fund_parts.append(f"Div={fd['div_yield']*100:.1f}%")
+        if fd.get("roe") is not None:
+            fund_parts.append(f"ROE={fd['roe']*100:.0f}%")
+        fund_str = " ".join(fund_parts)
+
+        # Storico ultimi 3 segnali (se disponibile)
+        hist = history_by_symbol.get(sym.upper(), [])[:3]
+        hist_str = " ".join(
+            f"[{h['action'][:1]}{h.get('composite_score', 0):+d}]"
+            for h in hist
+        ) if hist else "—"
+
+        # Momentum
+        mom = s.get("signal_momentum", {})
+        mom_str = f"mom={mom.get('score_trend', 0):+.0f}(×{mom.get('n_confirms', 0)})" if mom else ""
+
+        # Assembla riga compatta
+        parts = [f"{sym} {action} CS={cs:+d}({conf}%)"]
+        if sub_str:   parts.append(sub_str)
+        if ind_str:   parts.append(ind_str)
+        if risk_str:  parts.append(risk_str)
+        if fund_str:  parts.append(fund_str)
+        if mom_str:   parts.append(mom_str)
+        if hist_str != "—": parts.append(f"St:{hist_str}")
+        lines.append(" | ".join(parts))
+
+    if not lines:
+        return {}
+
+    signals_block = "\n".join(lines)
+    prompt = (
+        "Sei un analista quant senior. Valida questi segnali di mercato computati algoritmicamente.\n"
+        "Considera: forza tecnica (CS/sub-scores), indicatori, metriche di rischio, fondamentali, "
+        "coerenza storica (St:), momentum.\n"
+        "RISPOSTA: SOLO un JSON array valido, nessun altro testo.\n"
+        'Formato: [{"s":"SYMBOL","v":"CONFIRM","n":"breve nota IT max 15 parole"},{"s":"..."}]\n'
+        "v può essere: CONFIRM (segnale solido), CAUTION (valido con riserve), OVERRIDE (segnale debole).\n\n"
+        "LEGENDA: CS=CompositeScore Sh=Sharpe DD=MaxDrawdown β=Beta Div=DivYield "
+        "St=storico[azione:score] mom=momentum\n\n"
+        "SEGNALI DA VALIDARE:\n"
+        f"{signals_block}"
+    )
+
+    log.info(f"[PPLX_VALIDATE] Invio {len(lines)} segnali a Perplexity ({len(prompt)} chars)...")
+    raw = _perplexity_search(prompt, pplx_key, max_tokens=800)
+    if not raw:
+        return {}
+
+    # Parse JSON array dalla risposta
+    import re as _re
+    out: Dict[str, Dict] = {}
+    try:
+        m = _re.search(r'\[[\s\S]*?\]', raw)
+        if m:
+            items = json.loads(m.group())
+            for item in items:
+                sym_key = item.get("s", "").strip()
+                if sym_key:
+                    out[sym_key] = {
+                        "validation": item.get("v", "CONFIRM"),
+                        "note":       item.get("n", ""),
+                    }
+            log.info(f"[PPLX_VALIDATE] Parsed {len(out)} validazioni")
+        else:
+            log.warning("[PPLX_VALIDATE] Nessun JSON array trovato nella risposta Perplexity")
+    except Exception as e:
+        log.warning(f"[PPLX_VALIDATE] Parse error: {e} — risposta raw: {raw[:200]}")
+    return out
+
+
 def build_email_section(data: Dict, assets: List = None) -> str:
     """
     Genera la sezione Smart Money per l'email report unificata.

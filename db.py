@@ -43,6 +43,7 @@ def init_db(host: str, port: int, user: str, password: str, database: str) -> bo
         _enabled = True
         log.info(f"[DB] Connessione MariaDB OK: {user}@{host}:{port}/{database}")
         _create_schema()
+        _migrate_schema()
         return True
     except Exception as e:
         log.error(f"[DB] Connessione fallita: {e}")
@@ -96,20 +97,23 @@ def _create_schema():
         """,
         """
         CREATE TABLE IF NOT EXISTS signal_history (
-            id           INT AUTO_INCREMENT PRIMARY KEY,
-            run_id       INT,
-            run_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            symbol       VARCHAR(32),
-            action       VARCHAR(16),
-            score        INT,
-            confidence   INT,
-            price        DECIMAL(18,4),
-            entry        DECIMAL(18,4),
-            stop_loss    DECIMAL(18,4),
-            take_profit  DECIMAL(18,4),
-            risk_reward  DECIMAL(6,2),
-            market       VARCHAR(8),
-            asset_type   VARCHAR(16),
+            id              INT AUTO_INCREMENT PRIMARY KEY,
+            run_id          INT,
+            run_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            symbol          VARCHAR(32),
+            action          VARCHAR(16),
+            score           INT,
+            composite_score INT,
+            confidence      INT,
+            price           DECIMAL(18,4),
+            entry           DECIMAL(18,4),
+            stop_loss       DECIMAL(18,4),
+            take_profit     DECIMAL(18,4),
+            risk_reward     DECIMAL(6,2),
+            market          VARCHAR(8),
+            asset_type      VARCHAR(16),
+            sub_scores_json TEXT,
+            indicators_json TEXT,
             INDEX idx_symbol_run (symbol, run_at),
             INDEX idx_run_id     (run_id),
             INDEX idx_run_at     (run_at)
@@ -132,6 +136,31 @@ def _create_schema():
             for stmt in stmts:
                 cur.execute(stmt.strip())
         log.info("[DB] Schema verificato/creato")
+    finally:
+        conn.close()
+
+
+def _migrate_schema():
+    """
+    Aggiunge nuove colonne a tabelle esistenti — idempotente.
+    Necessario per DB già creati con schema vecchio.
+    """
+    migrations = [
+        "ALTER TABLE signal_history ADD COLUMN composite_score INT NULL",
+        "ALTER TABLE signal_history ADD COLUMN sub_scores_json TEXT NULL",
+        "ALTER TABLE signal_history ADD COLUMN indicators_json TEXT NULL",
+    ]
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            for sql in migrations:
+                try:
+                    cur.execute(sql)
+                except Exception:
+                    pass  # colonna già esistente — ignora
+        log.info("[DB] Migration colonne signal_history OK")
+    except Exception as e:
+        log.warning(f"[DB] _migrate_schema: {e}")
     finally:
         conn.close()
 
@@ -299,26 +328,44 @@ def save_analysis_run(signals: List[Dict], macro_ctx: Optional[Dict] = None) -> 
             ))
             run_id = cur.lastrowid
 
-            # Righe individuali per trend analysis
+            # Righe individuali per trend analysis e lookback
+            def _safe(v):
+                try:
+                    return float(v) if v not in (None, "", "N/A") else None
+                except (TypeError, ValueError):
+                    return None
+
             for s in signals:
                 if s.get("action") in ("BUY", "SELL", "WATCHLIST", "HOLD"):
-                    def _safe(v):
-                        try:
-                            return float(v) if v not in (None, "", "N/A") else None
-                        except (TypeError, ValueError):
-                            return None
+                    # Sub-scores compatti (solo valori non-zero)
+                    sub_raw = s.get("sub_scores", {})
+                    sub_compact = {k: v for k, v in sub_raw.items() if v != 0}
+
+                    # Indicatori chiave compatti (non tutto il dict indicators)
+                    ind_raw = s.get("indicators", {})
+                    ind_compact = {}
+                    for k in ("rsi", "adx", "macd_hist", "obv_trend", "bb_pos", "stoch_k", "vol_signal", "ma_cross", "atr_regime"):
+                        if ind_raw.get(k) is not None:
+                            ind_compact[k] = ind_raw[k]
+                    # Aggiungi risk_metrics se presenti
+                    rm = s.get("risk_metrics", {})
+                    if rm:
+                        ind_compact["sharpe"] = rm.get("sharpe_1y")
+                        ind_compact["beta"] = rm.get("beta")
+                        ind_compact["maxdd"] = rm.get("max_drawdown_1y_pct")
 
                     cur.execute("""
                         INSERT INTO signal_history
-                            (run_id, symbol, action, score, confidence,
+                            (run_id, symbol, action, score, composite_score, confidence,
                              price, entry, stop_loss, take_profit, risk_reward,
-                             market, asset_type)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                             market, asset_type, sub_scores_json, indicators_json)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """, (
                         run_id,
                         s.get("symbol", ""),
                         s.get("action", ""),
                         s.get("score", 0),
+                        s.get("composite_score", s.get("score", 0)),
                         s.get("confidence", 0),
                         _safe(s.get("price")),
                         _safe(s.get("entry")),
@@ -327,6 +374,8 @@ def save_analysis_run(signals: List[Dict], macro_ctx: Optional[Dict] = None) -> 
                         _safe(s.get("risk_reward")),
                         s.get("market", ""),
                         s.get("asset_type", ""),
+                        json.dumps(sub_compact) if sub_compact else None,
+                        json.dumps(ind_compact) if ind_compact else None,
                     ))
         conn.close()
         log.info(f"[DB] Analisi salvata: run_id={run_id} | {len(signals)} signals | "
@@ -377,8 +426,9 @@ def get_signal_trend(symbol: str, days: int = 30) -> List[Dict]:
         conn = _connect()
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT run_at, action, score, confidence,
-                       price, entry, stop_loss, take_profit, risk_reward
+                SELECT run_at, action, score, composite_score, confidence,
+                       price, entry, stop_loss, take_profit, risk_reward,
+                       sub_scores_json, indicators_json
                 FROM signal_history
                 WHERE symbol=%s
                   AND run_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
@@ -397,6 +447,57 @@ def get_signal_trend(symbol: str, days: int = 30) -> List[Dict]:
     except Exception as e:
         log.error(f"[DB] get_signal_trend ({symbol}): {e}")
         return []
+
+
+def get_history_compact(symbols: List[str], limit_per_symbol: int = 5) -> Dict[str, List[Dict]]:
+    """
+    Per ogni symbol, ritorna gli ultimi N segnali dal DB.
+    Usato internamente da run_scan() per il lookback storico e il momentum adjustment.
+    Ritorna: {SYMBOL_UPPER: [{run_at, action, composite_score, sub_scores_json, indicators_json}]}
+    """
+    if not _enabled or not symbols:
+        return {}
+    try:
+        # Normalizza e deduplica
+        syms = list({s.upper() for s in symbols if s})
+        placeholders = ",".join(["%s"] * len(syms))
+        conn = _connect()
+        with conn.cursor() as cur:
+            # Fetch last N per symbol usando variabile di sessione per row_number emulato
+            cur.execute(f"""
+                SELECT symbol, run_at, action, score, composite_score,
+                       confidence, sub_scores_json, indicators_json
+                FROM (
+                    SELECT *,
+                           @rn := IF(@prev = symbol, @rn + 1, 1) AS rn,
+                           @prev := symbol
+                    FROM signal_history
+                    CROSS JOIN (SELECT @rn:=0, @prev:='') AS init
+                    WHERE symbol IN ({placeholders})
+                    ORDER BY symbol, run_at DESC
+                ) ranked
+                WHERE rn <= %s
+                ORDER BY symbol, run_at DESC
+            """, syms + [limit_per_symbol])
+            rows = cur.fetchall()
+        conn.close()
+
+        out: Dict[str, List[Dict]] = {}
+        for r in rows:
+            sym = r["symbol"].upper()
+            d = {
+                "run_at":         r["run_at"].isoformat() if hasattr(r.get("run_at"), "isoformat") else str(r.get("run_at", "")),
+                "action":         r.get("action", ""),
+                "composite_score":r.get("composite_score") or r.get("score", 0),
+                "confidence":     r.get("confidence", 0),
+                "sub_scores":     json.loads(r["sub_scores_json"]) if r.get("sub_scores_json") else {},
+                "indicators":     json.loads(r["indicators_json"])  if r.get("indicators_json")  else {},
+            }
+            out.setdefault(sym, []).append(d)
+        return out
+    except Exception as e:
+        log.error(f"[DB] get_history_compact: {e}")
+        return {}
 
 
 def get_analysis_summary(days: int = 7) -> List[Dict]:

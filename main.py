@@ -10,7 +10,7 @@ from typing     import Optional, List
 import uvicorn
 
 from market_data            import fetch_all, load_assets, lookup_isin, _save_assets, assets_json_path
-from smart_money            import run_smart_money_analysis, build_email_section
+from smart_money            import run_smart_money_analysis, build_email_section, validate_signals_with_perplexity
 from macro_layer            import fetch_macro_context
 from fundamental_layer      import fetch_all_fundamentals
 from scoring_engine         import run_composite_scanner, enrich_with_smart_money
@@ -140,6 +140,16 @@ def run_scan():
              f"| pplx={'OK' if PPLX_KEY else 'NO'} "
              f"| window={'OPEN' if is_trading_hours() else 'CLOSED'}")
 
+    # Lookback storico: carica ultimi N segnali per asset dal DB (usati per momentum e validazione)
+    history_by_symbol = {}
+    if db.is_enabled():
+        try:
+            history_by_symbol = db.get_history_compact(symbols, limit_per_symbol=5)
+            n_with_history = sum(1 for v in history_by_symbol.values() if len(v) > 0)
+            log.info(f"[SCHEDULER] History lookback: {n_with_history}/{len(symbols)} simboli con storico")
+        except Exception as e:
+            log.warning(f"[SCHEDULER] History lookback fallito: {e}")
+
     # Step 1: fetch real market data
     log.info(f"[STEP 1/4 MARKET] fetching {len(symbols)} symbols via yfinance...")
     tech = fetch_all(symbols)
@@ -231,6 +241,31 @@ def run_scan():
                  f"score={s['score']:+d} conf={s['confidence']}% "
                  f"entry={s['entry']} SL={s['stop_loss']} TP={s['take_profit']} RR=1:{s['risk_reward']}")
 
+    # Signal momentum: aggiusta composite_score (+/-3 max) in base alla coerenza storica
+    if history_by_symbol:
+        for sig in signals:
+            hist = history_by_symbol.get(sig["symbol"].upper(), [])
+            if len(hist) < 2:
+                continue
+            cs_hist = [h.get("composite_score") or 0 for h in hist[:5]]
+            trend   = cs_hist[0] - cs_hist[-1]   # positivo = score in crescita
+            recent_actions = [h["action"] for h in hist[:3]]
+            n_confirm = sum(1 for a in recent_actions if a == sig["action"])
+            mom_adj = 0
+            if trend > 15 and n_confirm >= 2:
+                mom_adj = +3
+            elif trend < -15 and n_confirm >= 2:
+                mom_adj = -3
+            if mom_adj != 0:
+                sig["composite_score"] = max(-100, min(100, sig.get("composite_score", 0) + mom_adj))
+            sig["signal_momentum"] = {
+                "score_trend":  round(trend, 1),
+                "adj":          mom_adj,
+                "n_confirms":   n_confirm,
+                "last_actions": recent_actions[:3],
+                "history_runs": len(hist),
+            }
+
     # Step 3: AI enrichment (top 3 only)
     # â"€â"€ Step 3: AI enrichment - SOLO in finestra 08:00-23:30 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if not is_trading_hours():
@@ -248,13 +283,6 @@ def run_scan():
     state.update({"signals": signals, "tech_data": tech,
                   "last_run": run_ts, "next_run": next_ts, "running": False})
 
-    # Persistenza su MariaDB
-    if db.is_enabled():
-        try:
-            db.save_analysis_run(signals, state.get("macro_context"))
-        except Exception as e:
-            log.error(f"[DB] save_analysis_run: {e}")
-
     # â"€â"€ Step 3.5: Smart Money - SOLO in finestra â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if not is_trading_hours():
         log.info("[STEP 3.5/4 SMART_MONEY] SKIPPED - fuori finestra operativa")
@@ -267,7 +295,8 @@ def run_scan():
             log.info(f"[STEP 3.5/4 SMART_MONEY] {n_opp} opp | qualita={sm.get('data_quality','?')}")
             if n_opp and state.get("signals"):
                 state["signals"] = enrich_with_smart_money(state["signals"], sm)
-                log.info(f"[STEP 3.5/4 SMART_MONEY] Segnali asset arricchiti con overlay Smart Money")
+                signals = state["signals"]
+                log.info("[STEP 3.5/4 SMART_MONEY] Segnali asset arricchiti con overlay Smart Money")
             if db.is_enabled() and not sm.get("error"):
                 try:
                     db.save_smart_money(sm)
@@ -275,6 +304,28 @@ def run_scan():
                     log.error(f"[DB] save_smart_money: {_e}")
         except Exception as e:
             log.error(f"[STEP 3.5/4 SMART_MONEY] {e}")
+
+    # Persistenza su MariaDB — DOPO SM enrichment (signals_json include overlay smart money)
+    if db.is_enabled():
+        try:
+            db.save_analysis_run(signals, state.get("macro_context"))
+        except Exception as e:
+            log.error(f"[DB] save_analysis_run: {e}")
+
+    # â"€â"€ Step 3.6: Perplexity validation finale (compact batch) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    if is_trading_hours() and PPLX_KEY:
+        try:
+            log.info("[STEP 3.6 PPLX_VALIDATE] Validazione finale segnali via Perplexity...")
+            pplx_val = validate_signals_with_perplexity(signals, history_by_symbol, PPLX_KEY)
+            if pplx_val:
+                for sig in signals:
+                    v = pplx_val.get(sig["symbol"])
+                    if v:
+                        sig["perplexity_validation"] = v
+                state["signals"] = signals
+                log.info(f"[STEP 3.6 PPLX_VALIDATE] {len(pplx_val)} segnali validati")
+        except Exception as e:
+            log.error(f"[STEP 3.6 PPLX_VALIDATE] {e}")
 
     # Step 4: email
     log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
