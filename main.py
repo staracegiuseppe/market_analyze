@@ -86,6 +86,20 @@ BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
 PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
 ASSETS = load_assets()
+CRYPTO_ASSETS_PATH = Path(__file__).parent / "crypto_assets.json"
+CRYPTO_SCHEDULER_MINUTES = 10
+
+
+def load_crypto_assets() -> list:
+    try:
+        if CRYPTO_ASSETS_PATH.exists():
+            return [a for a in json.load(open(CRYPTO_ASSETS_PATH, encoding="utf-8")) if a.get("enabled", True)]
+    except Exception as e:
+        log.error(f"[CRYPTO] load_crypto_assets: {e}")
+    return []
+
+
+CRYPTO_ASSETS = load_crypto_assets()
 log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
 
 # Migra asset da JSON a DB alla prima avvio (solo se tabella vuota)
@@ -602,6 +616,35 @@ def run_income_plan() -> dict:
             log.error(f"[DB] save_income_plan: {e}")
     return plan
 
+
+def run_crypto_scan() -> dict:
+    if state["crypto_running"]:
+        return {"signals": state.get("crypto_signals", [])}
+    state["crypto_running"] = True
+    try:
+        assets = CRYPTO_ASSETS
+        symbols = [a["symbol"] for a in assets]
+        tech = fetch_all(symbols)
+        signals = []
+        for asset in assets:
+            sig = build_quant_signal(tech.get(asset["symbol"]), asset)
+            sig["trading_window"] = True
+            sig["scan_type"] = "crypto"
+            signals.append(_signal_to_eur(sig))
+        signals.sort(key=lambda s: (s.get("action") in ("BUY", "SELL", "WATCHLIST"), s.get("confidence", 0), s.get("score", 0)), reverse=True)
+        now = datetime.utcnow()
+        state["crypto_signals"] = signals
+        state["crypto_last_run"] = now.isoformat() + "Z"
+        state["crypto_next_run"] = (now + timedelta(minutes=CRYPTO_SCHEDULER_MINUTES)).isoformat() + "Z"
+        return {
+            "signals": signals,
+            "last_run": state["crypto_last_run"],
+            "next_run": state["crypto_next_run"],
+            "count": len(signals),
+        }
+    finally:
+        state["crypto_running"] = False
+
 # Modello Pydantic per asset
 class AssetModel(BaseModel):
     symbol:     str
@@ -661,6 +704,10 @@ state = {
     "income_plan": None,
     "income_last_run": None,
     "income_next_run": None,
+    "crypto_signals": [],
+    "crypto_last_run": None,
+    "crypto_next_run": None,
+    "crypto_running": False,
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -896,6 +943,7 @@ def _scheduler_loop():
     last_run_at = None  # timestamp ultimo run completato
     last_wallet_run_at = None
     last_income_run_at = None
+    last_crypto_run_at = None
 
     # Prima scansione solo se siamo dentro la finestra
     if is_trading_hours():
@@ -909,9 +957,20 @@ def _scheduler_loop():
         last_income_run_at = datetime.utcnow()
     else:
         log.info("[SCHEDULER] Fuori finestra operativa - prima scansione posticipata alle 08:00")
+    if CRYPTO_ASSETS:
+        run_crypto_scan()
+        last_crypto_run_at = datetime.utcnow()
 
     while True:
         time.sleep(60)  # controlla ogni minuto
+
+        now = datetime.utcnow()
+        if CRYPTO_ASSETS and (
+            last_crypto_run_at is None or (now - last_crypto_run_at).total_seconds() >= CRYPTO_SCHEDULER_MINUTES * 60
+        ):
+            log.info(f"[CRYPTO] Avvio scansione crypto (ultima: {last_crypto_run_at.strftime('%H:%M') if last_crypto_run_at else 'mai'})")
+            run_crypto_scan()
+            last_crypto_run_at = datetime.utcnow()
 
         if not SCHEDULER_ENABLED:
             continue
@@ -921,7 +980,6 @@ def _scheduler_loop():
             continue
 
         # Siamo in finestra: controlla se Ã¨ ora di girare
-        now = datetime.utcnow()
         if last_run_at is None or (now - last_run_at).total_seconds() >= SCHEDULER_MINUTES * 60:
             log.info(f"[SCHEDULER] Avvio scansione (ultima: {last_run_at.strftime('%H:%M') if last_run_at else 'mai'})")
             run_scan()
@@ -968,13 +1026,16 @@ async def health():
             "assets":len(ASSETS),"anthropic":bool(CLAUDE_KEY),"perplexity":bool(PPLX_KEY),
             "trading_window":is_trading_hours(),"bind":BIND_HOST,
             "email_enabled":bool(OPTIONS.get("email_enabled")),
-            "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES}
+            "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES,
+            "crypto_scheduler_minutes": CRYPTO_SCHEDULER_MINUTES,
+            "crypto_assets": len(CRYPTO_ASSETS)}
 
 @app.get("/api/config")
 async def config():
     return {"scheduler_minutes":SCHEDULER_MINUTES,"scheduler_enabled":SCHEDULER_ENABLED,
             "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES,
             "income_scheduler_minutes": INCOME_SCHEDULER_MINUTES,
+            "crypto_scheduler_minutes": CRYPTO_SCHEDULER_MINUTES,
             "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
             "has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
@@ -1278,6 +1339,31 @@ async def get_signal(symbol: str):
     for s in state.get("signals",[]):
         if s["symbol"].upper() == sym: return _signal_to_eur(s)
     raise HTTPException(404, f"{symbol} not found")
+
+
+@app.get("/api/crypto/signals")
+async def get_crypto_signals(action: Optional[str] = None):
+    sigs = state.get("crypto_signals", [])
+    if not sigs:
+        result = run_crypto_scan()
+        sigs = result.get("signals", [])
+    if action:
+        sigs = [s for s in sigs if s.get("action", "").upper() == action.upper()]
+    return {
+        "last_run": state.get("crypto_last_run"),
+        "next_run": state.get("crypto_next_run"),
+        "count": len(sigs),
+        "signals": sigs,
+        "assets": CRYPTO_ASSETS,
+    }
+
+
+@app.post("/api/crypto/refresh")
+async def refresh_crypto(background_tasks: BackgroundTasks):
+    if state.get("crypto_running"):
+        return {"status": "already_running"}
+    background_tasks.add_task(run_crypto_scan)
+    return {"status": "started"}
 
 @app.post("/api/scanner/refresh")
 async def scanner_refresh(background_tasks: BackgroundTasks):

@@ -1,0 +1,110 @@
+[
+  {
+    "symbol": "BTC-EUR",
+    "name": "Bitcoin (BTC)",
+    "full_name": "Bitcoin",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "ETH-EUR",
+    "name": "Ethereum (ETH)",
+    "full_name": "Ethereum",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "SOL-EUR",
+    "name": "Solana (SOL)",
+    "full_name": "Solana",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "XRP-EUR",
+    "name": "Ripple (XRP)",
+    "full_name": "Ripple",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "ADA-EUR",
+    "name": "Cardano (ADA)",
+    "full_name": "Cardano",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "DOT-EUR",
+    "name": "Polkadot (DOT)",
+    "full_name": "Polkadot",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "MATIC-EUR",
+    "name": "Polygon (MATIC)",
+    "full_name": "Polygon",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "DOGE-EUR",
+    "name": "Dogecoin (DOGE)",
+    "full_name": "Dogecoin",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  },
+  {
+    "symbol": "SHIB-EUR",
+    "name": "Shiba Inu (SHIB)",
+    "full_name": "Shiba Inu",
+    "isin": "N/A - Crypto",
+    "market": "CRYPTO",
+    "country": "INT",
+    "asset_type": "crypto",
+    "currency": "EUR",
+    "exchange": "Trade Republic",
+    "enabled": true
+  }
+]

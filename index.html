@@ -149,6 +149,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 <!-- TABS -->
 <div class="tabs">
   <div class="tab active" onclick="showTab('signals')">⊕ Segnali</div>
+  <div class="tab" onclick="showTab('crypto')">₿ Crypto</div>
   <div class="tab" onclick="showTab('wallet')">💼 Wallet</div>
   <div class="tab" onclick="showTab('income')">💶 Rendita</div>
   <div class="tab" onclick="showTab('assets')">◈ Asset</div>
@@ -497,6 +498,27 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   </div>
 </div>
 
+<!-- ═══════════════════ TAB: CRYPTO ═══════════════════ -->
+<div class="tc" id="tab-crypto">
+  <div class="cfg-banner">
+    <span id="crypto-meta">In attesa della prima scansione crypto...</span>
+    <span id="crypto-sched" style="margin-left:auto;color:#6880A0"></span>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#F9FAFB">₿ Trading Crypto</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:2px">Listino Trade Republic: BTC, ETH, SOL, XRP, ADA, DOT, MATIC, DOGE, SHIB</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="spin" id="crypto-spin"></div>
+      <button class="btn" onclick="refreshCrypto()">↻ Aggiorna crypto</button>
+    </div>
+  </div>
+  <div id="crypto-grid" style="max-width:900px">
+    <div style="padding:30px;text-align:center;color:#6B7280">Scansione crypto in avvio...</div>
+  </div>
+</div>
+
 <!-- ═══════════════════ TAB: INCOME ═══════════════════ -->
 <div class="tc" id="tab-income">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -663,6 +685,7 @@ function eur(v){ return v === null || v === undefined || v === '' ? '—' : '€
 //  STATE
 // ════════════════════════════════════════════════════════════
 let allSignals = [];
+let cryptoSignals = [];
 let fltMkt = 'all', fltAct = 'all';
 let cfg = {};
 let walletData = null;
@@ -674,12 +697,13 @@ let incomePlan = null;
 // ════════════════════════════════════════════════════════════
 //  TABS
 // ════════════════════════════════════════════════════════════
-const TAB_IDS = ['signals','wallet','income','assets','backtest','log','settings','smartmoney'];
+const TAB_IDS = ['signals','crypto','wallet','income','assets','backtest','log','settings','smartmoney'];
 function showTab(id){
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active', TAB_IDS[i]===id));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el = document.getElementById('tab-'+id);
   if(el) el.classList.add('active');
+  if(id==='crypto')     loadCryptoSignals();
   if(id==='wallet')     loadWallet();
   if(id==='income')     loadIncomePlan();
   if(id==='assets')     loadAssets();
@@ -1515,6 +1539,65 @@ async function refreshWallet(){
   sp.classList.remove('on');
 }
 
+function renderCryptoSignals(){
+  const grid = document.getElementById('crypto-grid');
+  if(!cryptoSignals.length){
+    grid.innerHTML = '<div style="padding:30px;text-align:center;color:#6B7280">Nessun segnale crypto disponibile.</div>';
+    return;
+  }
+
+  const buy   = cryptoSignals.filter(s=>s.action==='BUY');
+  const sell  = cryptoSignals.filter(s=>s.action==='SELL');
+  const watch = cryptoSignals.filter(s=>s.action==='WATCHLIST');
+  const hold  = cryptoSignals.filter(s=>!['BUY','SELL','WATCHLIST'].includes(s.action));
+
+  let html = '';
+  if(buy.length) html += '<div class="sig-section"><div class="sig-section-hdr buy">🟢 CRYPTO BUY ('+buy.length+')</div>'+buy.map(buildCard).join('')+'</div>';
+  if(sell.length) html += '<div class="sig-section"><div class="sig-section-hdr sell">🔴 CRYPTO SELL ('+sell.length+')</div>'+sell.map(buildCard).join('')+'</div>';
+  if(watch.length) html += '<div class="sig-section"><div class="sig-section-hdr watch">🔵 CRYPTO WATCHLIST ('+watch.length+')</div>'+watch.map(buildCard).join('')+'</div>';
+  if(hold.length){
+    html += '<div class="sig-section"><div style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:8px">⚪ ALTRE CRYPTO MONITORATE ('+hold.length+')</div>'
+      + '<div style="background:#111827;border:1px solid #1F2937;border-radius:8px;overflow:hidden">'
+      + '<table class="hold-table"><tr><th>Simbolo</th><th>Nome</th><th>Stato</th><th>Score</th><th>RSI / ADX</th><th>Prezzo</th></tr>'
+      + hold.map(s=>'<tr>'+buildHoldRow(s)+'</tr>').join('')
+      + '</table></div></div>';
+  }
+  grid.innerHTML = html;
+}
+
+async function loadCryptoSignals(){
+  try{
+    const r = await fetch(api('/api/crypto/signals'));
+    if(!r.ok){
+      document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto HTTP '+r.status+'</div>';
+      return;
+    }
+    const d = await r.json();
+    cryptoSignals = d.signals || [];
+    document.getElementById('crypto-meta').innerHTML =
+      'Ultima scansione: <b style="color:#D0DFF8">'+(d.last_run?fmtTime(d.last_run):'—')+'</b>'
+      + ' · Prossima: <b style="color:#D0DFF8">'+(d.next_run?fmtTime(d.next_run):'—')+'</b>'
+      + ' · Asset: <b style="color:#C8A020">'+cryptoSignals.length+'</b>';
+    document.getElementById('crypto-sched').textContent = 'Auto-check ogni '+(cfg.crypto_scheduler_minutes||10)+' min';
+    renderCryptoSignals();
+  }catch(e){
+    document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto: '+e.message+'</div>';
+  }
+}
+
+async function refreshCrypto(){
+  const sp = document.getElementById('crypto-spin');
+  sp.classList.add('on');
+  try{
+    await fetch(api('/api/crypto/refresh'), {method:'POST'});
+    await new Promise(r=>setTimeout(r,2500));
+    await loadCryptoSignals();
+  }catch(e){
+    document.getElementById('crypto-meta').textContent = 'Errore refresh crypto: '+e.message;
+  }
+  sp.classList.remove('on');
+}
+
 // ════════════════════════════════════════════════════════════
 //  INCOME PLAN
 // ════════════════════════════════════════════════════════════
@@ -2301,11 +2384,13 @@ async function init(){
   }
   // Carica rotazione settoriale in background
   loadSectorRotation().catch(function(e){ console.warn('sector rotation:', e); });
+  loadCryptoSignals().catch(function(e){ console.warn('crypto:', e); });
   loadWallet().catch(function(e){ console.warn('wallet:', e); });
   loadIncomePlan().catch(function(e){ console.warn('income plan:', e); });
   const count = allSignals.length;
   document.getElementById('hdr-count').textContent = count+' asset';
   setInterval(loadSignals, 300000);
+  setInterval(loadCryptoSignals, 600000);
   setInterval(loadWallet, 300000);
   setInterval(loadIncomePlan, 1800000);
 }
@@ -2317,6 +2402,8 @@ window.showTab       = showTab;
 window.setMkt        = setMkt;
 window.setAct        = setAct;
 window.refreshScanner= refreshScanner;
+window.loadCryptoSignals = loadCryptoSignals;
+window.refreshCrypto = refreshCrypto;
 window.runBacktest   = runBacktest;
 window.testEmail     = testEmail;
 window.loadAssets    = loadAssets;
