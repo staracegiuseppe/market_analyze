@@ -148,6 +148,10 @@ def _create_schema():
             horizon_days          INT DEFAULT 30,
             alert_enabled         TINYINT(1) DEFAULT 1,
             enabled               TINYINT(1) DEFAULT 1,
+            position_status       VARCHAR(16) DEFAULT 'ACTIVE',
+            closed_at             TIMESTAMP NULL,
+            exit_price            DECIMAL(18,6) NULL,
+            exit_note             TEXT,
             note                  TEXT,
             created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -237,6 +241,10 @@ def _migrate_schema():
         "ALTER TABLE wallet_holdings ADD COLUMN horizon_days INT DEFAULT 30",
         "ALTER TABLE wallet_holdings ADD COLUMN alert_enabled TINYINT(1) DEFAULT 1",
         "ALTER TABLE wallet_holdings ADD COLUMN enabled TINYINT(1) DEFAULT 1",
+        "ALTER TABLE wallet_holdings ADD COLUMN position_status VARCHAR(16) DEFAULT 'ACTIVE'",
+        "ALTER TABLE wallet_holdings ADD COLUMN closed_at TIMESTAMP NULL",
+        "ALTER TABLE wallet_holdings ADD COLUMN exit_price DECIMAL(18,6) NULL",
+        "ALTER TABLE wallet_holdings ADD COLUMN exit_note TEXT NULL",
     ]
     conn = _connect()
     try:
@@ -305,6 +313,10 @@ def _row_to_wallet_holding(r: Dict) -> Dict:
         "horizon_days":  int(r.get("horizon_days") or 30),
         "alert_enabled": bool(r.get("alert_enabled", 1)),
         "enabled":       bool(r.get("enabled", 1)),
+        "position_status": (r.get("position_status") or "ACTIVE").upper(),
+        "closed_at":     r["closed_at"].isoformat() if r.get("closed_at") and hasattr(r["closed_at"], "isoformat") else None,
+        "exit_price":    float(r["exit_price"]) if r.get("exit_price") is not None else None,
+        "exit_note":     r.get("exit_note") or "",
         "note":          r.get("note") or "",
     }
 
@@ -411,13 +423,16 @@ def migrate_assets_from_json(assets: List[Dict]):
 
 # ── Wallet holdings ───────────────────────────────────────────────────────────
 
-def load_wallet_holdings() -> List[Dict]:
+def load_wallet_holdings(include_closed: bool = False) -> List[Dict]:
     if not _enabled:
         return []
     try:
         conn = _connect()
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM wallet_holdings ORDER BY symbol")
+            if include_closed:
+                cur.execute("SELECT * FROM wallet_holdings ORDER BY position_status ASC, symbol")
+            else:
+                cur.execute("SELECT * FROM wallet_holdings WHERE COALESCE(position_status,'ACTIVE')='ACTIVE' ORDER BY symbol")
             rows = cur.fetchall()
         conn.close()
         return [_row_to_wallet_holding(r) for r in rows]
@@ -436,19 +451,21 @@ def save_wallet_holding(holding: Dict) -> bool:
                 INSERT INTO wallet_holdings
                     (symbol, name, full_name, isin, market, country, asset_type, currency,
                      exchange, quantity, avg_price, target_price, stop_loss, horizon_days,
-                     alert_enabled, enabled, note)
+                     alert_enabled, enabled, position_status, closed_at, exit_price, exit_note, note)
                 VALUES
                     (%(symbol)s, %(name)s, %(full_name)s, %(isin)s, %(market)s, %(country)s,
                      %(asset_type)s, %(currency)s, %(exchange)s, %(quantity)s, %(avg_price)s,
                      %(target_price)s, %(stop_loss)s, %(horizon_days)s, %(alert_enabled)s,
-                     %(enabled)s, %(note)s)
+                     %(enabled)s, %(position_status)s, %(closed_at)s, %(exit_price)s, %(exit_note)s, %(note)s)
                 ON DUPLICATE KEY UPDATE
                     name=VALUES(name), full_name=VALUES(full_name), isin=VALUES(isin),
                     market=VALUES(market), country=VALUES(country), asset_type=VALUES(asset_type),
                     currency=VALUES(currency), exchange=VALUES(exchange), quantity=VALUES(quantity),
                     avg_price=VALUES(avg_price), target_price=VALUES(target_price),
                     stop_loss=VALUES(stop_loss), horizon_days=VALUES(horizon_days),
-                    alert_enabled=VALUES(alert_enabled), enabled=VALUES(enabled), note=VALUES(note)
+                    alert_enabled=VALUES(alert_enabled), enabled=VALUES(enabled),
+                    position_status=VALUES(position_status), closed_at=VALUES(closed_at),
+                    exit_price=VALUES(exit_price), exit_note=VALUES(exit_note), note=VALUES(note)
             """, {
                 "symbol":        holding.get("symbol", ""),
                 "name":          holding.get("name", ""),
@@ -466,6 +483,10 @@ def save_wallet_holding(holding: Dict) -> bool:
                 "horizon_days":  holding.get("horizon_days", 30),
                 "alert_enabled": 1 if holding.get("alert_enabled", True) else 0,
                 "enabled":       1 if holding.get("enabled", True) else 0,
+                "position_status": (holding.get("position_status") or "ACTIVE").upper(),
+                "closed_at":     holding.get("closed_at"),
+                "exit_price":    holding.get("exit_price"),
+                "exit_note":     holding.get("exit_note", ""),
                 "note":          holding.get("note", ""),
             })
         conn.close()
@@ -487,6 +508,52 @@ def delete_wallet_holding(symbol: str) -> bool:
         return affected > 0
     except Exception as e:
         log.error(f"[DB] delete_wallet_holding ({symbol}): {e}")
+        return False
+
+
+def close_wallet_holding(symbol: str, exit_price: Optional[float] = None, exit_note: str = "") -> bool:
+    if not _enabled:
+        return False
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE wallet_holdings
+                SET position_status='CLOSED',
+                    closed_at=NOW(),
+                    exit_price=%s,
+                    exit_note=%s,
+                    enabled=0
+                WHERE symbol=%s
+            """, (exit_price, exit_note, symbol.upper()))
+            affected = cur.rowcount
+        conn.close()
+        return affected > 0
+    except Exception as e:
+        log.error(f"[DB] close_wallet_holding ({symbol}): {e}")
+        return False
+
+
+def reopen_wallet_holding(symbol: str) -> bool:
+    if not _enabled:
+        return False
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE wallet_holdings
+                SET position_status='ACTIVE',
+                    closed_at=NULL,
+                    exit_price=NULL,
+                    exit_note='',
+                    enabled=1
+                WHERE symbol=%s
+            """, (symbol.upper(),))
+            affected = cur.rowcount
+        conn.close()
+        return affected > 0
+    except Exception as e:
+        log.error(f"[DB] reopen_wallet_holding ({symbol}): {e}")
         return False
 
 

@@ -601,6 +601,20 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   </div>
 
   <div id="wallet-cards" style="margin-top:12px"></div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="ph">🗂 Storico Posizioni Chiuse</div>
+    <div class="pb" style="padding:0">
+      <div style="overflow:auto">
+        <table class="trade-table" style="width:100%">
+          <thead><tr><th>Simbolo</th><th>Qty</th><th>PMC</th><th>Prezzo uscita</th><th>Chiusa il</th><th>Nota</th><th></th></tr></thead>
+          <tbody id="wallet-closed-body">
+            <tr><td colspan="7" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione chiusa</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════════ TAB: SMART MONEY ═══════════════════ -->
@@ -643,6 +657,7 @@ function fmtTime(t){
 }
 function safe(v, fallback){ return (v !== undefined && v !== null) ? v : fallback; }
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function eur(v){ return v === null || v === undefined || v === '' ? '—' : '€ ' + Number(v).toFixed(2); }
 
 // ════════════════════════════════════════════════════════════
 //  STATE
@@ -652,6 +667,7 @@ let fltMkt = 'all', fltAct = 'all';
 let cfg = {};
 let walletData = null;
 let walletHoldings = [];
+let walletClosedHoldings = [];
 let walletEditSymbol = null;
 let incomePlan = null;
 
@@ -774,7 +790,7 @@ function buildCard(s){
   const act  = lblAct(s.action);
   const conf = safe(s.confidence, 0);
   const score = safe(s.score, 0);
-  const curr = safe(s.currency, '');
+  const curr = '€';
   const ind  = safe(s.indicators, {});
   const isin = safe(s.isin, '');
 
@@ -824,12 +840,12 @@ function buildCard(s){
     const guadagno = Math.abs(s.take_profit - s.entry).toFixed(2);
     livelliHtml = '<div class="livelli-grid">'
       + '<div class="livello-box"><div class="livello-lbl">Entrata</div>'
-      + '<div class="livello-val" style="color:#F9FAFB">'+curr+' '+s.entry+'</div></div>'
+      + '<div class="livello-val" style="color:#F9FAFB">'+curr+' '+Number(s.entry).toFixed(2)+'</div></div>'
       + '<div class="livello-box"><div class="livello-lbl">Stop Loss</div>'
-      + '<div class="livello-val" style="color:#DC2626">'+curr+' '+s.stop_loss+'</div>'
+      + '<div class="livello-val" style="color:#DC2626">'+curr+' '+Number(s.stop_loss).toFixed(2)+'</div>'
       + '<div style="font-size:9px;color:#6B7280;margin-top:2px">Rischio: '+rischio+'</div></div>'
       + '<div class="livello-box"><div class="livello-lbl">Obiettivo</div>'
-      + '<div class="livello-val" style="color:#16A34A">'+curr+' '+s.take_profit+'</div>'
+      + '<div class="livello-val" style="color:#16A34A">'+curr+' '+Number(s.take_profit).toFixed(2)+'</div>'
       + '<div style="font-size:9px;color:#6B7280;margin-top:2px">Guadagno: '+guadagno+'</div></div>'
       + '<div class="livello-box" style="border-right:none"><div class="livello-lbl">Rischio / Rendimento</div>'
       + '<div class="livello-val" style="color:#F59E0B">1 : '+safe(s.risk_reward,'—')+'</div></div>'
@@ -1057,7 +1073,8 @@ function buildCard(s){
     + (compScore!==null?'<span style="font-size:9px;color:#9CA3AF">Composito: <b style="color:'+col+'">'+compScore+'</b></span>':'')
     + '</div>'+subHtml+'</div>'
     + '<div style="text-align:right;flex-shrink:0;margin-left:16px">'
-    + (s.price?'<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+curr+' '+s.price+'</div>':'')
+    + (s.price?'<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+eur(s.price)+'</div>':'')
+    + (s.original_currency && s.original_currency!=='EUR' && s.original_price?'<div style="font-size:10px;color:#6B7280;margin-top:2px">Origine: '+escH(s.original_currency)+' '+Number(s.original_price).toFixed(2)+'</div>':'')
     + '<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:'+col+';font-weight:700">'+techScore+'</span></div>'
     + divYieldHdr
     + '</div></div>'
@@ -1081,7 +1098,7 @@ function buildHoldRow(s){
     + '<td style="color:#6B7280">'+lblAct(s.action)+'</td>'
     + '<td style="color:'+col+';font-family:monospace">'+(safe(s.composite_score,s.score||0)>=0?'+':'')+safe(s.composite_score,s.score||0)+'</td>'
     + '<td style="color:#9CA3AF">'+(ind.rsi?'RSI '+ind.rsi:'')+(ind.adx?' · ADX '+ind.adx:'')+'</td>'
-    + '<td style="font-family:monospace">'+(s.price?safe(s.currency,'')+' '+s.price:'—')+'</td>';
+    + '<td style="font-family:monospace">'+(s.price?eur(s.price):'—')+'</td>';
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1264,9 +1281,9 @@ function renderWalletSummary(summary){
   }
   const cards = [
     ['Posizioni', summary.holdings_count, '#D0DFF8'],
-    ['Valore', (summary.market_value_total||0).toFixed(2), '#60A5FA'],
-    ['Investito', (summary.invested_total||0).toFixed(2), '#C8A020'],
-    ['P/L', ((summary.pnl_total||0)>=0?'+':'')+(summary.pnl_total||0).toFixed(2)+' ('+((summary.pnl_pct_total||0)>=0?'+':'')+(summary.pnl_pct_total||0).toFixed(2)+'%)', (summary.pnl_total||0)>=0?'#16A34A':'#DC2626'],
+    ['Valore', eur(summary.market_value_total||0), '#60A5FA'],
+    ['Investito', eur(summary.invested_total||0), '#C8A020'],
+    ['P/L', ((summary.pnl_total||0)>=0?'+':'')+eur(Math.abs(summary.pnl_total||0)).replace('€ ','')+' ('+((summary.pnl_pct_total||0)>=0?'+':'')+(summary.pnl_pct_total||0).toFixed(2)+'%)', (summary.pnl_total||0)>=0?'#16A34A':'#DC2626'],
   ];
   el.innerHTML = cards.map(([lbl,val,col]) =>
     '<div class="panel"><div class="pb">'
@@ -1285,7 +1302,7 @@ function renderWalletHistory(runs){
   el.innerHTML = runs.slice(0,6).map(r =>
     '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #19203022;font-size:11px">'
     + '<span style="color:#9CA3AF">'+fmtTime(r.run_at)+'</span>'
-    + '<span style="color:'+(r.pnl_total>=0?'#16A34A':'#DC2626')+'">'+(r.pnl_total>=0?'+':'')+Number(r.pnl_total||0).toFixed(2)+'</span>'
+    + '<span style="color:'+(r.pnl_total>=0?'#16A34A':'#DC2626')+'">'+(r.pnl_total>=0?'+':'')+eur(Math.abs(r.pnl_total||0)).replace('€ ','')+'</span>'
     + '<span style="color:#6B7280">'+(r.alert_count||0)+' alert</span>'
     + '</div>'
   ).join('');
@@ -1302,14 +1319,33 @@ function renderWalletHoldings(holdings){
     return '<tr>'
       + '<td>'+escH(h.symbol)+'</td>'
       + '<td>'+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</td>'
-      + '<td>'+Number(h.avg_price||0).toFixed(2)+'</td>'
-      + '<td>'+(h.current_price!=null?Number(h.current_price).toFixed(2):'—')+'</td>'
-      + '<td style="color:'+(Number(h.pnl_amount||0)>=0?'#16A34A':'#DC2626')+'">'+(Number(h.pnl_amount||0)>=0?'+':'')+Number(h.pnl_amount||0).toFixed(2)+'<br><span style="font-size:10px;color:#6B7280">'+(Number(h.pnl_pct||0)>=0?'+':'')+Number(h.pnl_pct||0).toFixed(2)+'%</span></td>'
+      + '<td>'+eur(h.avg_price||0)+'</td>'
+      + '<td>'+(h.current_price!=null?eur(h.current_price):'—')+'</td>'
+      + '<td style="color:'+(Number(h.pnl_amount||0)>=0?'#16A34A':'#DC2626')+'">'+(Number(h.pnl_amount||0)>=0?'+':'')+eur(Math.abs(h.pnl_amount||0)).replace('€ ','')+'<br><span style="font-size:10px;color:#6B7280">'+(Number(h.pnl_pct||0)>=0?'+':'')+Number(h.pnl_pct||0).toFixed(2)+'%</span></td>'
       + '<td style="color:'+col+';font-weight:700">'+escH(h.recommendation||'HOLD')+'<br><span style="font-size:10px;color:#6B7280">'+escH(h.signal_action||'HOLD')+' · '+Number(h.confidence||0)+'%</span></td>'
       + '<td>'+Number(h.holding_days_estimate||0)+'g</td>'
-      + '<td><button class="btn" style="padding:4px 8px;font-size:10px;margin-right:4px" onclick="editWalletHolding(\''+h.symbol+'\')">✏</button><button class="btn" style="padding:4px 8px;font-size:10px;border-color:#DC262644;color:#DC2626" onclick="deleteWalletHolding(\''+h.symbol+'\')">🗑</button></td>'
+      + '<td><button class="btn" style="padding:4px 8px;font-size:10px;margin-right:4px" onclick="editWalletHolding(\''+h.symbol+'\')">✏</button><button class="btn" style="padding:4px 8px;font-size:10px;margin-right:4px;border-color:#F59E0B44;color:#F59E0B" onclick="closeWalletHolding(\''+h.symbol+'\')">Chiudi</button><button class="btn" style="padding:4px 8px;font-size:10px;border-color:#DC262644;color:#DC2626" onclick="deleteWalletHolding(\''+h.symbol+'\')">🗑</button></td>'
       + '</tr>';
   }).join('');
+}
+
+function renderClosedWalletHoldings(holdings){
+  const tbody = document.getElementById('wallet-closed-body');
+  if(!holdings || !holdings.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione chiusa</td></tr>';
+    return;
+  }
+  tbody.innerHTML = holdings.map(h =>
+    '<tr>'
+    + '<td>'+escH(h.symbol)+'</td>'
+    + '<td>'+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</td>'
+    + '<td>'+eur(h.avg_price||0)+'</td>'
+    + '<td>'+(h.exit_price!=null?eur(h.exit_price):'—')+'</td>'
+    + '<td>'+(h.closed_at?String(h.closed_at).slice(0,16).replace('T',' '):'—')+'</td>'
+    + '<td style="color:#9CA3AF">'+escH(h.exit_note||h.note||'')+'</td>'
+    + '<td><button class="btn" style="padding:4px 8px;font-size:10px;margin-right:4px" onclick="reopenWalletHolding(\''+h.symbol+'\')">Riapri</button><button class="btn" style="padding:4px 8px;font-size:10px;border-color:#DC262644;color:#DC2626" onclick="deleteWalletHolding(\''+h.symbol+'\')">Elimina</button></td>'
+    + '</tr>'
+  ).join('');
 }
 
 function renderWalletCards(holdings){
@@ -1324,13 +1360,13 @@ function renderWalletCards(holdings){
     return '<div class="sig-card" style="margin-bottom:12px">'
       + '<div class="sig-card-hdr" style="border-left:4px solid '+col+'">'
       + '<div><div style="font-size:18px;font-weight:800;color:#F9FAFB">'+escH(h.symbol)+' <span style="font-size:12px;color:#6B7280">'+escH(h.name||'')+'</span></div>'
-      + '<div style="font-size:11px;color:#9CA3AF;margin-top:3px">Valore attuale: <b>'+(h.market_value!=null?Number(h.market_value).toFixed(2):'—')+'</b> · Quantità: '+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</div></div>'
+      + '<div style="font-size:11px;color:#9CA3AF;margin-top:3px">Valore attuale: <b>'+(h.market_value!=null?eur(h.market_value):'—')+'</b> · Quantità: '+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</div></div>'
       + '<div style="text-align:right"><div style="font-size:12px;font-weight:800;color:'+col+'">'+escH(h.recommendation||'HOLD')+'</div>'
       + '<div style="font-size:10px;color:#6B7280">Segnale '+escH(h.signal_action||'HOLD')+' · conf. '+Number(h.confidence||0)+'%</div></div></div>'
       + '<div class="sig-card-body"><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px">'
-      + '<div class="ind-item"><div class="ind-lbl">PREZZO</div><div class="ind-val">'+(h.current_price!=null?Number(h.current_price).toFixed(2):'—')+'</div></div>'
-      + '<div class="ind-item"><div class="ind-lbl">PREZZO MEDIO</div><div class="ind-val">'+Number(h.avg_price||0).toFixed(2)+'</div></div>'
-      + '<div class="ind-item"><div class="ind-lbl">P/L</div><div class="ind-val" style="color:'+(Number(h.pnl_amount||0)>=0?'#16A34A':'#DC2626')+'">'+(Number(h.pnl_amount||0)>=0?'+':'')+Number(h.pnl_amount||0).toFixed(2)+'</div><div class="ind-note">'+(Number(h.pnl_pct||0)>=0?'+':'')+Number(h.pnl_pct||0).toFixed(2)+'%</div></div>'
+      + '<div class="ind-item"><div class="ind-lbl">PREZZO</div><div class="ind-val">'+(h.current_price!=null?eur(h.current_price):'—')+'</div></div>'
+      + '<div class="ind-item"><div class="ind-lbl">PREZZO MEDIO</div><div class="ind-val">'+eur(h.avg_price||0)+'</div></div>'
+      + '<div class="ind-item"><div class="ind-lbl">P/L</div><div class="ind-val" style="color:'+(Number(h.pnl_amount||0)>=0?'#16A34A':'#DC2626')+'">'+(Number(h.pnl_amount||0)>=0?'+':'')+eur(Math.abs(h.pnl_amount||0)).replace('€ ','')+'</div><div class="ind-note">'+(Number(h.pnl_pct||0)>=0?'+':'')+Number(h.pnl_pct||0).toFixed(2)+'%</div></div>'
       + '<div class="ind-item"><div class="ind-lbl">ORIZZONTE</div><div class="ind-val">'+Number(h.holding_days_estimate||0)+' giorni</div></div>'
       + '</div>'
       + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Perché</div>'
@@ -1341,22 +1377,27 @@ function renderWalletCards(holdings){
 
 async function loadWallet(){
   try{
-    const [walletRes, histRes] = await Promise.all([
+    const [walletRes, histRes, holdingsRes] = await Promise.all([
       fetch(api('/api/wallet')),
       fetch(api('/api/wallet/history?days=3')),
+      fetch(api('/api/wallet/holdings?include_closed=true')),
     ]);
     const wallet = await walletRes.json();
     const history = histRes.ok ? await histRes.json() : {runs:[]};
+    const holdingsData = holdingsRes.ok ? await holdingsRes.json() : {holdings:[]};
     walletData = wallet;
     walletHoldings = wallet.holdings || [];
+    walletClosedHoldings = (holdingsData.holdings || []).filter(h => (h.position_status || 'ACTIVE') !== 'ACTIVE');
     document.getElementById('wallet-meta').innerHTML =
       'Ultimo controllo: <b style="color:#D0DFF8">'+(wallet.last_run?fmtTime(wallet.last_run):'—')+'</b>'
       + ' · Prossimo: <b style="color:#D0DFF8">'+(wallet.next_run?fmtTime(wallet.next_run):'—')+'</b>'
-      + ' · Alert attivi: <b style="color:#C8A020">'+((wallet.alerts||[]).length)+'</b>';
+      + ' · Alert attivi: <b style="color:#C8A020">'+((wallet.alerts||[]).length)+'</b>'
+      + ' · Storico: <b style="color:#D0DFF8">'+(wallet.closed_count||walletClosedHoldings.length)+'</b>';
     document.getElementById('wallet-sched').textContent = 'Auto-check ogni '+(cfg.wallet_scheduler_minutes||15)+' min';
     renderWalletSummary(wallet.summary || {});
     renderWalletHistory(history.runs || []);
     renderWalletHoldings(walletHoldings);
+    renderClosedWalletHoldings(walletClosedHoldings);
     renderWalletCards(walletHoldings);
   }catch(e){
     document.getElementById('wallet-meta').textContent = 'Errore wallet: '+e.message;
@@ -1403,12 +1444,48 @@ function editWalletHolding(symbol){
 }
 
 async function deleteWalletHolding(symbol){
-  if(!confirm('Eliminare la posizione '+symbol+'?')) return;
+  if(!confirm('Eliminare definitivamente la posizione '+symbol+'?')) return;
   try{
     const r = await fetch(api('/api/wallet/holdings/'+encodeURIComponent(symbol)), {method:'DELETE'});
     const d = await r.json();
     if(!r.ok) throw new Error(d.detail || 'Eliminazione non riuscita');
     resetWalletForm();
+    await loadWallet();
+  }catch(e){
+    document.getElementById('wallet-form-msg').style.color = '#DC2626';
+    document.getElementById('wallet-form-msg').textContent = e.message;
+  }
+}
+
+async function closeWalletHolding(symbol){
+  const exitPriceRaw = prompt('Prezzo di uscita in EUR per '+symbol+' (facoltativo):', '');
+  if(exitPriceRaw === null) return;
+  const exitNote = prompt('Nota di chiusura (facoltativa):', '') || '';
+  const payload = {
+    exit_price: exitPriceRaw !== '' ? Number(exitPriceRaw) : null,
+    exit_note: exitNote,
+  };
+  try{
+    const r = await fetch(api('/api/wallet/holdings/'+encodeURIComponent(symbol)+'/close'), {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Chiusura non riuscita');
+    resetWalletForm();
+    await loadWallet();
+  }catch(e){
+    document.getElementById('wallet-form-msg').style.color = '#DC2626';
+    document.getElementById('wallet-form-msg').textContent = e.message;
+  }
+}
+
+async function reopenWalletHolding(symbol){
+  try{
+    const r = await fetch(api('/api/wallet/holdings/'+encodeURIComponent(symbol)+'/reopen'), {method:'POST'});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Riapertura non riuscita');
     await loadWallet();
   }catch(e){
     document.getElementById('wallet-form-msg').style.color = '#DC2626';
@@ -1480,9 +1557,17 @@ function renderIncomeInstruments(plan){
 
 function renderIncomeActions(plan){
   const actions = plan.actions || [];
-  document.getElementById('income-actions').innerHTML = actions.length
+  const buyPlan = plan.buy_plan || [];
+  const actionsHtml = actions.length
     ? actions.map(a => '<div style="padding:7px 0;border-bottom:1px solid #19203022;font-size:11px"><b style="color:#D0DFF8">'+escH(a.symbol)+'</b> · <span style="color:'+(a.action==='comprare'?'#16A34A':a.action==='ridurre'?'#DC2626':'#F59E0B')+'">'+escH(a.action)+'</span><div style="color:#6B7280;margin-top:2px">'+escH(a.note||'')+'</div></div>').join('')
     : '<div style="color:#6B7280">Nessuna azione operativa disponibile.</div>';
+  const buyHtml = buyPlan.length
+    ? '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #192030">'
+      + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:8px">ACQUISTI SUGGERITI PER AVVICINARTI AL TARGET</div>'
+      + buyPlan.map(b => '<div style="padding:7px 0;border-bottom:1px solid #19203022;font-size:11px"><b style="color:#D0DFF8">'+escH(b.symbol)+'</b> · compra circa <span style="color:#16A34A">'+eur(b.buy_amount_eur)+'</span><div style="color:#6B7280;margin-top:2px">Contributo stimato: '+eur(b.estimated_monthly_income_add)+'/mese · '+escH(b.reason||'')+'</div></div>').join('')
+      + '</div>'
+    : '<div style="margin-top:12px;color:#6B7280">Il portafoglio e\' gia\' vicino al target oppure servono piu\' strumenti acquistabili per formulare una proposta.</div>';
+  document.getElementById('income-actions').innerHTML = actionsHtml + buyHtml;
 }
 
 function renderIncomeHistory(runs){
@@ -2233,6 +2318,8 @@ window.saveWalletHolding = saveWalletHolding;
 window.resetWalletForm = resetWalletForm;
 window.editWalletHolding = editWalletHolding;
 window.deleteWalletHolding = deleteWalletHolding;
+window.closeWalletHolding = closeWalletHolding;
+window.reopenWalletHolding = reopenWalletHolding;
 window.refreshWallet = refreshWallet;
 window.loadSectorRotation = loadSectorRotation;
 window.openAddForm   = openAddForm;

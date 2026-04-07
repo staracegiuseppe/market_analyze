@@ -8,6 +8,7 @@ from fastapi.responses       import HTMLResponse
 from pydantic   import BaseModel
 from typing     import Optional, List
 import uvicorn
+import requests
 
 from market_data            import fetch_all, load_assets, lookup_isin, _save_assets, assets_json_path
 from smart_money            import run_smart_money_analysis, build_email_section, validate_signals_with_perplexity
@@ -110,6 +111,12 @@ def _load_wallet_holdings() -> list:
     return []
 
 
+def _load_wallet_history() -> list:
+    if db.is_enabled():
+        return [h for h in db.load_wallet_holdings(include_closed=True) if (h.get("position_status") or "ACTIVE") != "ACTIVE"]
+    return []
+
+
 def _find_asset_metadata(symbol: str) -> dict:
     sym = symbol.strip().upper()
     for asset in _load_all_assets():
@@ -128,6 +135,62 @@ def _normalize_wallet_holding(data: dict) -> dict:
     merged["avg_price"] = float(merged.get("avg_price") or 0)
     merged["horizon_days"] = max(1, int(merged.get("horizon_days") or 30))
     return merged
+
+
+_fx_cache = {"rates": {"EUR": 1.0}, "updated_at": 0.0}
+
+
+def _get_fx_rate_to_eur(currency: str) -> float:
+    cur = (currency or "EUR").upper()
+    if cur == "EUR":
+        return 1.0
+    now = time.time()
+    cached = _fx_cache["rates"].get(cur)
+    if cached and (_fx_cache["updated_at"] + 3600) > now:
+        return cached
+    try:
+        resp = requests.get(f"https://api.frankfurter.app/latest?from={cur}&to=EUR", timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        rate = float((data.get("rates") or {}).get("EUR") or 0)
+        if rate > 0:
+            _fx_cache["rates"][cur] = rate
+            _fx_cache["updated_at"] = now
+            return rate
+    except Exception as e:
+        log.warning(f"[FX] cambio {cur}->EUR non disponibile: {e}")
+    return cached or 1.0
+
+
+def _to_eur(value, currency: str):
+    try:
+        if value in (None, "", "N/A"):
+            return None
+        return round(float(value) * _get_fx_rate_to_eur(currency), 4)
+    except Exception:
+        return None
+
+
+def _signal_to_eur(signal: dict) -> dict:
+    s = dict(signal)
+    if s.get("display_currency") == "EUR":
+        return s
+    cur = (s.get("currency") or "EUR").upper()
+    s["original_currency"] = cur
+    s["fx_rate_to_eur"] = _get_fx_rate_to_eur(cur)
+    for key in ("price", "entry", "stop_loss", "take_profit"):
+        if s.get(key) not in (None, "", "N/A"):
+            s[f"original_{key}"] = s.get(key)
+            s[key] = _to_eur(s.get(key), cur)
+    indicators = dict(s.get("indicators") or {})
+    for key in ("support", "resistance", "ma20", "ma50", "ma200"):
+        if indicators.get(key) not in (None, "", "N/A"):
+            indicators[f"original_{key}"] = indicators.get(key)
+            indicators[key] = _to_eur(indicators.get(key), cur)
+    s["indicators"] = indicators
+    s["currency"] = "EUR"
+    s["display_currency"] = "EUR"
+    return s
 
 
 def _upsert_wallet_from_asset(asset: dict, quantity: Optional[float] = None, avg_price: Optional[float] = None,
@@ -282,6 +345,7 @@ def run_wallet_review(force_email: bool = False) -> dict:
                 signal = build_quant_signal(tech.get(sym), holding)
                 signal["symbol"] = sym
                 signal["name"] = holding.get("name", sym)
+                signal = _signal_to_eur(signal)
             current_price = (signal or {}).get("price")
             quantity = float(holding.get("quantity") or 0)
             avg_price = float(holding.get("avg_price") or 0)
@@ -460,6 +524,8 @@ def run_income_plan() -> dict:
 
     annual_yield = round(max(annual_yield * 0.9, 0.01), 4)
     estimated_monthly_income = round((invested_capital * annual_yield) / 12, 2)
+    monthly_goal = 1000.0
+    monthly_gap = round(max(monthly_goal - estimated_monthly_income, 0), 2)
     target_capital = round(12000 / annual_yield, 2) if annual_yield > 0 else 0.0
     gap_to_target = round(max(target_capital - invested_capital, 0), 2)
 
@@ -480,6 +546,27 @@ def run_income_plan() -> dict:
             "note": item["reason"],
         })
 
+    buy_candidates = [x for x in instruments if x["recommendation"] in ("comprare", "mantenere")]
+    buy_plan = []
+    if monthly_gap > 0 and buy_candidates:
+        plan_capital = min(gap_to_target if gap_to_target > 0 else target_capital, max(monthly_gap * 12 / annual_yield if annual_yield else 0, 0))
+        plan_capital = round(plan_capital if plan_capital > 0 else gap_to_target, 2)
+        weighted = []
+        for item in buy_candidates[:5]:
+            role_mul = {"income": 1.0, "growth": 0.75, "opportunistico": 0.45}.get(item["role"], 0.6)
+            weighted.append((item, max(item["estimated_annual_yield"] * role_mul, 0.001)))
+        total_weight = sum(w for _, w in weighted) or 1
+        for item, weight in weighted:
+            alloc_eur = round(plan_capital * weight / total_weight, 2)
+            monthly_contribution = round((alloc_eur * item["estimated_annual_yield"]) / 12, 2)
+            buy_plan.append({
+                "symbol": item["symbol"],
+                "role": item["role"],
+                "buy_amount_eur": alloc_eur,
+                "estimated_monthly_income_add": monthly_contribution,
+                "reason": item["reason"],
+            })
+
     plan = {
         "market_scenario": profile["scenario"],
         "risk_level": profile["risk"],
@@ -492,6 +579,8 @@ def run_income_plan() -> dict:
         },
         "summary": {
             "estimated_monthly_income": estimated_monthly_income,
+            "monthly_goal": monthly_goal,
+            "monthly_gap": monthly_gap,
             "portfolio_avg_yield_pct": round(annual_yield * 100, 2),
             "target_capital_for_goal": target_capital,
             "gap_to_target": gap_to_target,
@@ -499,6 +588,7 @@ def run_income_plan() -> dict:
         },
         "instruments": instruments,
         "actions": actions,
+        "buy_plan": buy_plan,
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "next_run": (datetime.utcnow() + timedelta(minutes=INCOME_SCHEDULER_MINUTES)).isoformat() + "Z",
     }
@@ -775,6 +865,9 @@ def run_scan():
         except Exception as e:
             log.error(f"[STEP 3.6 PPLX_VALIDATE] {e}")
 
+    signals = [_signal_to_eur(sig) for sig in signals]
+    state["signals"] = signals
+
     # Step 4: email
     log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
     # â"€â"€ Step 4: Email - SOLO in finestra â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -1032,6 +1125,7 @@ async def get_wallet():
         wallet = run_wallet_review()
     return {
         "holdings_count": len(_load_wallet_holdings()),
+        "closed_count": len(_load_wallet_history()),
         "last_run": state.get("wallet_last_run"),
         "next_run": state.get("wallet_next_run"),
         **wallet,
@@ -1039,8 +1133,8 @@ async def get_wallet():
 
 
 @app.get("/api/wallet/holdings")
-async def get_wallet_holdings():
-    holdings = _load_wallet_holdings()
+async def get_wallet_holdings(include_closed: bool = False):
+    holdings = db.load_wallet_holdings(include_closed=include_closed) if db.is_enabled() else []
     return {"count": len(holdings), "holdings": holdings}
 
 
@@ -1080,6 +1174,34 @@ async def remove_wallet_holding(symbol: str):
         raise HTTPException(404, f"Posizione {symbol.upper()} non trovata")
     wallet = run_wallet_review()
     return {"status": "deleted", "symbol": symbol.upper(), "wallet": wallet}
+
+
+@app.post("/api/wallet/holdings/{symbol}/close")
+async def close_wallet_position(symbol: str, payload: Optional[dict] = Body(default=None)):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
+    payload = payload or {}
+    exit_price = payload.get("exit_price")
+    exit_note = payload.get("exit_note", "")
+    if exit_price is not None:
+        try:
+            exit_price = float(exit_price)
+        except Exception:
+            raise HTTPException(400, "exit_price non valido")
+    if not db.close_wallet_holding(symbol.upper(), exit_price=exit_price, exit_note=exit_note):
+        raise HTTPException(404, f"Posizione {symbol.upper()} non trovata")
+    wallet = run_wallet_review()
+    return {"status": "closed", "symbol": symbol.upper(), "wallet": wallet}
+
+
+@app.post("/api/wallet/holdings/{symbol}/reopen")
+async def reopen_wallet_position(symbol: str):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
+    if not db.reopen_wallet_holding(symbol.upper()):
+        raise HTTPException(404, f"Posizione {symbol.upper()} non trovata")
+    wallet = run_wallet_review()
+    return {"status": "reopened", "symbol": symbol.upper(), "wallet": wallet}
 
 
 @app.post("/api/wallet/refresh")
@@ -1142,7 +1264,7 @@ async def lookup_asset_by_isin(isin: str):
 async def get_signals(market: Optional[str] = None,
                       asset_type: Optional[str] = None,
                       action: Optional[str] = None):
-    sigs = state.get("signals", [])
+    sigs = [_signal_to_eur(s) for s in state.get("signals", [])]
     if market:     sigs = [s for s in sigs if s.get("market","").upper() == market.upper()]
     if asset_type: sigs = [s for s in sigs if s.get("asset_type","").lower() == asset_type.lower()]
     if action:     sigs = [s for s in sigs if s.get("action","").upper() == action.upper()]
@@ -1154,7 +1276,7 @@ async def get_signals(market: Optional[str] = None,
 async def get_signal(symbol: str):
     sym = symbol.upper()
     for s in state.get("signals",[]):
-        if s["symbol"].upper() == sym: return s
+        if s["symbol"].upper() == sym: return _signal_to_eur(s)
     raise HTTPException(404, f"{symbol} not found")
 
 @app.post("/api/scanner/refresh")
@@ -1297,16 +1419,24 @@ async def get_chart(symbol: str, days: int = 60):
         closes = [round(float(v),4) for v in df["Close"].tolist()]
         volumes= [int(v) for v in df["Volume"].tolist()]
         dates  = [str(d.date()) for d in df.index.tolist()]
+        currency = "EUR"
+        for s in state.get("signals", []):
+            if s.get("symbol", "").upper() == sym:
+                currency = s.get("original_currency") or s.get("currency") or "EUR"
+                break
+        rate = _get_fx_rate_to_eur(currency)
+        closes = [round(v * rate, 4) for v in closes]
         # Media mobile 20gg
         import pandas as pd
         ma20 = df["Close"].rolling(20).mean().tail(days)
-        ma20_vals = [round(float(v),4) if not pd.isna(v) else None for v in ma20.tolist()]
+        ma20_vals = [round(float(v) * rate,4) if not pd.isna(v) else None for v in ma20.tolist()]
         return {
             "symbol": sym,
             "dates":  dates,
             "closes": closes,
             "volumes":volumes,
             "ma20":   ma20_vals,
+            "currency": "EUR",
             "last":   closes[-1] if closes else None,
             "min":    min(closes) if closes else None,
             "max":    max(closes) if closes else None,
