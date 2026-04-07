@@ -129,6 +129,77 @@ def _create_schema():
             analysis_json        MEDIUMTEXT
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS wallet_holdings (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            symbol                VARCHAR(32) NOT NULL UNIQUE,
+            name                  VARCHAR(255),
+            full_name             VARCHAR(512),
+            isin                  VARCHAR(64),
+            market                VARCHAR(8),
+            country               VARCHAR(8),
+            asset_type            VARCHAR(16),
+            currency              VARCHAR(8),
+            exchange              VARCHAR(32),
+            quantity              DECIMAL(18,6) DEFAULT 0,
+            avg_price             DECIMAL(18,6) DEFAULT 0,
+            target_price          DECIMAL(18,6) NULL,
+            stop_loss             DECIMAL(18,6) NULL,
+            horizon_days          INT DEFAULT 30,
+            alert_enabled         TINYINT(1) DEFAULT 1,
+            enabled               TINYINT(1) DEFAULT 1,
+            note                  TEXT,
+            created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wallet_analysis_runs (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            run_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            holdings_count        INT DEFAULT 0,
+            invested_total        DECIMAL(18,2) DEFAULT 0,
+            market_value_total    DECIMAL(18,2) DEFAULT 0,
+            pnl_total             DECIMAL(18,2) DEFAULT 0,
+            pnl_pct_total         DECIMAL(10,4) DEFAULT 0,
+            alert_count           INT DEFAULT 0,
+            analysis_json         MEDIUMTEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wallet_snapshot_items (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            run_id                INT NOT NULL,
+            run_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            symbol                VARCHAR(32) NOT NULL,
+            quantity              DECIMAL(18,6) DEFAULT 0,
+            avg_price             DECIMAL(18,6) DEFAULT 0,
+            current_price         DECIMAL(18,6) NULL,
+            invested_amount       DECIMAL(18,2) DEFAULT 0,
+            market_value          DECIMAL(18,2) DEFAULT 0,
+            pnl_amount            DECIMAL(18,2) DEFAULT 0,
+            pnl_pct               DECIMAL(10,4) DEFAULT 0,
+            signal_action         VARCHAR(16),
+            recommendation        VARCHAR(24),
+            confidence            INT DEFAULT 0,
+            holding_days_estimate INT DEFAULT 0,
+            analysis_json         MEDIUMTEXT,
+            INDEX idx_wallet_symbol_run (symbol, run_at),
+            INDEX idx_wallet_run_id     (run_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wallet_alerts (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            symbol                VARCHAR(32) NOT NULL,
+            alert_type            VARCHAR(32) NOT NULL,
+            recommendation        VARCHAR(24),
+            confidence            INT DEFAULT 0,
+            payload_json          MEDIUMTEXT,
+            INDEX idx_wallet_alert_symbol_created (symbol, created_at)
+        )
+        """,
     ]
     conn = _connect()
     try:
@@ -149,6 +220,11 @@ def _migrate_schema():
         "ALTER TABLE signal_history ADD COLUMN composite_score INT NULL",
         "ALTER TABLE signal_history ADD COLUMN sub_scores_json TEXT NULL",
         "ALTER TABLE signal_history ADD COLUMN indicators_json TEXT NULL",
+        "ALTER TABLE wallet_holdings ADD COLUMN target_price DECIMAL(18,6) NULL",
+        "ALTER TABLE wallet_holdings ADD COLUMN stop_loss DECIMAL(18,6) NULL",
+        "ALTER TABLE wallet_holdings ADD COLUMN horizon_days INT DEFAULT 30",
+        "ALTER TABLE wallet_holdings ADD COLUMN alert_enabled TINYINT(1) DEFAULT 1",
+        "ALTER TABLE wallet_holdings ADD COLUMN enabled TINYINT(1) DEFAULT 1",
     ]
     conn = _connect()
     try:
@@ -196,6 +272,28 @@ def _row_to_asset(r: Dict) -> Dict:
         "exchange":   r.get("exchange") or "",
         "enabled":    bool(r.get("enabled", 1)),
         "note":       r.get("note") or "",
+    }
+
+
+def _row_to_wallet_holding(r: Dict) -> Dict:
+    return {
+        "symbol":        r["symbol"],
+        "name":          r.get("name") or "",
+        "full_name":     r.get("full_name") or "",
+        "isin":          r.get("isin") or "",
+        "market":        r.get("market") or "US",
+        "country":       r.get("country") or "US",
+        "asset_type":    r.get("asset_type") or "stock",
+        "currency":      r.get("currency") or "USD",
+        "exchange":      r.get("exchange") or "",
+        "quantity":      float(r.get("quantity") or 0),
+        "avg_price":     float(r.get("avg_price") or 0),
+        "target_price":  float(r["target_price"]) if r.get("target_price") is not None else None,
+        "stop_loss":     float(r["stop_loss"]) if r.get("stop_loss") is not None else None,
+        "horizon_days":  int(r.get("horizon_days") or 30),
+        "alert_enabled": bool(r.get("alert_enabled", 1)),
+        "enabled":       bool(r.get("enabled", 1)),
+        "note":          r.get("note") or "",
     }
 
 
@@ -297,6 +395,87 @@ def migrate_assets_from_json(assets: List[Dict]):
         log.info("[DB] Migrazione assets completata")
     except Exception as e:
         log.error(f"[DB] migrate_assets_from_json: {e}")
+
+
+# ── Wallet holdings ───────────────────────────────────────────────────────────
+
+def load_wallet_holdings() -> List[Dict]:
+    if not _enabled:
+        return []
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM wallet_holdings ORDER BY symbol")
+            rows = cur.fetchall()
+        conn.close()
+        return [_row_to_wallet_holding(r) for r in rows]
+    except Exception as e:
+        log.error(f"[DB] load_wallet_holdings: {e}")
+        return []
+
+
+def save_wallet_holding(holding: Dict) -> bool:
+    if not _enabled:
+        return False
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO wallet_holdings
+                    (symbol, name, full_name, isin, market, country, asset_type, currency,
+                     exchange, quantity, avg_price, target_price, stop_loss, horizon_days,
+                     alert_enabled, enabled, note)
+                VALUES
+                    (%(symbol)s, %(name)s, %(full_name)s, %(isin)s, %(market)s, %(country)s,
+                     %(asset_type)s, %(currency)s, %(exchange)s, %(quantity)s, %(avg_price)s,
+                     %(target_price)s, %(stop_loss)s, %(horizon_days)s, %(alert_enabled)s,
+                     %(enabled)s, %(note)s)
+                ON DUPLICATE KEY UPDATE
+                    name=VALUES(name), full_name=VALUES(full_name), isin=VALUES(isin),
+                    market=VALUES(market), country=VALUES(country), asset_type=VALUES(asset_type),
+                    currency=VALUES(currency), exchange=VALUES(exchange), quantity=VALUES(quantity),
+                    avg_price=VALUES(avg_price), target_price=VALUES(target_price),
+                    stop_loss=VALUES(stop_loss), horizon_days=VALUES(horizon_days),
+                    alert_enabled=VALUES(alert_enabled), enabled=VALUES(enabled), note=VALUES(note)
+            """, {
+                "symbol":        holding.get("symbol", ""),
+                "name":          holding.get("name", ""),
+                "full_name":     holding.get("full_name", ""),
+                "isin":          holding.get("isin", ""),
+                "market":        holding.get("market", "US"),
+                "country":       holding.get("country", "US"),
+                "asset_type":    holding.get("asset_type", "stock"),
+                "currency":      holding.get("currency", "USD"),
+                "exchange":      holding.get("exchange", ""),
+                "quantity":      holding.get("quantity", 0),
+                "avg_price":     holding.get("avg_price", 0),
+                "target_price":  holding.get("target_price"),
+                "stop_loss":     holding.get("stop_loss"),
+                "horizon_days":  holding.get("horizon_days", 30),
+                "alert_enabled": 1 if holding.get("alert_enabled", True) else 0,
+                "enabled":       1 if holding.get("enabled", True) else 0,
+                "note":          holding.get("note", ""),
+            })
+        conn.close()
+        return True
+    except Exception as e:
+        log.error(f"[DB] save_wallet_holding ({holding.get('symbol')}): {e}")
+        return False
+
+
+def delete_wallet_holding(symbol: str) -> bool:
+    if not _enabled:
+        return False
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM wallet_holdings WHERE symbol=%s", (symbol,))
+            affected = cur.rowcount
+        conn.close()
+        return affected > 0
+    except Exception as e:
+        log.error(f"[DB] delete_wallet_holding ({symbol}): {e}")
+        return False
 
 
 # ── Persistenza analisi ────────────────────────────────────────────────────────
@@ -410,6 +589,180 @@ def save_smart_money(data: Dict) -> bool:
         return True
     except Exception as e:
         log.error(f"[DB] save_smart_money: {e}")
+        return False
+
+
+def save_wallet_analysis_run(payload: Dict) -> Optional[int]:
+    if not _enabled:
+        return None
+    try:
+        holdings = payload.get("holdings", []) or []
+        summary  = payload.get("summary", {}) or {}
+        alerts   = payload.get("alerts", []) or []
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO wallet_analysis_runs
+                    (holdings_count, invested_total, market_value_total, pnl_total,
+                     pnl_pct_total, alert_count, analysis_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                len(holdings),
+                summary.get("invested_total", 0),
+                summary.get("market_value_total", 0),
+                summary.get("pnl_total", 0),
+                summary.get("pnl_pct_total", 0),
+                len(alerts),
+                json.dumps(payload, default=str),
+            ))
+            run_id = cur.lastrowid
+
+            for item in holdings:
+                cur.execute("""
+                    INSERT INTO wallet_snapshot_items
+                        (run_id, symbol, quantity, avg_price, current_price, invested_amount,
+                         market_value, pnl_amount, pnl_pct, signal_action, recommendation,
+                         confidence, holding_days_estimate, analysis_json)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    run_id,
+                    item.get("symbol", ""),
+                    item.get("quantity", 0),
+                    item.get("avg_price", 0),
+                    item.get("current_price"),
+                    item.get("invested_amount", 0),
+                    item.get("market_value", 0),
+                    item.get("pnl_amount", 0),
+                    item.get("pnl_pct", 0),
+                    item.get("signal_action", ""),
+                    item.get("recommendation", ""),
+                    item.get("confidence", 0),
+                    item.get("holding_days_estimate", 0),
+                    json.dumps(item, default=str),
+                ))
+        conn.close()
+        return run_id
+    except Exception as e:
+        log.error(f"[DB] save_wallet_analysis_run: {e}")
+        return None
+
+
+def get_wallet_history(days: int = 7) -> List[Dict]:
+    if not _enabled:
+        return []
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, run_at, holdings_count, invested_total, market_value_total,
+                       pnl_total, pnl_pct_total, alert_count
+                FROM wallet_analysis_runs
+                WHERE run_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                ORDER BY run_at DESC
+                LIMIT 500
+            """, (days,))
+            rows = cur.fetchall()
+        conn.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d.get("run_at") and hasattr(d["run_at"], "isoformat"):
+                d["run_at"] = d["run_at"].isoformat()
+            for key in ("invested_total", "market_value_total", "pnl_total", "pnl_pct_total"):
+                if d.get(key) is not None:
+                    d[key] = float(d[key])
+            out.append(d)
+        return out
+    except Exception as e:
+        log.error(f"[DB] get_wallet_history: {e}")
+        return []
+
+
+def get_wallet_position_history(symbol: str, days: int = 30) -> List[Dict]:
+    if not _enabled:
+        return []
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT run_at, current_price, market_value, pnl_amount, pnl_pct,
+                       signal_action, recommendation, confidence, holding_days_estimate
+                FROM wallet_snapshot_items
+                WHERE symbol=%s
+                  AND run_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                ORDER BY run_at DESC
+                LIMIT 500
+            """, (symbol.upper(), days))
+            rows = cur.fetchall()
+        conn.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d.get("run_at") and hasattr(d["run_at"], "isoformat"):
+                d["run_at"] = d["run_at"].isoformat()
+            for key in ("current_price", "market_value", "pnl_amount", "pnl_pct"):
+                if d.get(key) is not None:
+                    d[key] = float(d[key])
+            out.append(d)
+        return out
+    except Exception as e:
+        log.error(f"[DB] get_wallet_position_history ({symbol}): {e}")
+        return []
+
+
+def get_recent_wallet_alert(symbol: str, alert_type: str, within_hours: int = 12) -> Optional[Dict]:
+    if not _enabled:
+        return None
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT created_at, recommendation, confidence, payload_json
+                FROM wallet_alerts
+                WHERE symbol=%s AND alert_type=%s
+                  AND created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (symbol.upper(), alert_type, within_hours))
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        out = dict(row)
+        if out.get("created_at") and hasattr(out["created_at"], "isoformat"):
+            out["created_at"] = out["created_at"].isoformat()
+        if out.get("payload_json"):
+            try:
+                out["payload"] = json.loads(out["payload_json"])
+            except Exception:
+                out["payload"] = {}
+        return out
+    except Exception as e:
+        log.error(f"[DB] get_recent_wallet_alert ({symbol}, {alert_type}): {e}")
+        return None
+
+
+def save_wallet_alert(symbol: str, alert_type: str, recommendation: str, confidence: int, payload: Dict) -> bool:
+    if not _enabled:
+        return False
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO wallet_alerts
+                    (symbol, alert_type, recommendation, confidence, payload_json)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                symbol.upper(),
+                alert_type,
+                recommendation,
+                confidence,
+                json.dumps(payload, default=str),
+            ))
+        conn.close()
+        return True
+    except Exception as e:
+        log.error(f"[DB] save_wallet_alert ({symbol}, {alert_type}): {e}")
         return False
 
 

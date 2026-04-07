@@ -66,6 +66,28 @@ def _send_apppassword(msg, sender, recipient, host, port, user, pw, tls):
         log.error(f"[SMTP] {e}"); return False
 
 
+def _dispatch_email(msg, opts):
+    sender    = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
+    recipient = opts.get("email_to")
+    if not sender or not recipient:
+        log.error("[EMAIL] sender/recipient mancanti")
+        return False
+    cid     = opts.get("oauth2_client_id", "")
+    secret  = opts.get("oauth2_client_secret", "")
+    refresh = opts.get("oauth2_refresh_token", "")
+    if cid and secret and refresh and sender.endswith("@gmail.com"):
+        if _send_oauth2(msg, sender, recipient, cid, secret, refresh):
+            return True
+    return _send_apppassword(
+        msg, sender, recipient,
+        opts.get("smtp_host", "smtp.gmail.com"),
+        int(opts.get("smtp_port", 587)),
+        opts.get("smtp_user", ""),
+        opts.get("smtp_password", ""),
+        bool(opts.get("smtp_tls", True)),
+    )
+
+
 # ── Traduzione motivazioni ────────────────────────────────────────────────────
 _TR = {
     "price>MA20>MA50":        "Prezzo sopra media 20 e 50 giorni → trend rialzista",
@@ -221,6 +243,67 @@ def _perf_section(ind: dict, curr: str) -> str:
         f'<table style="width:100%;border-collapse:collapse">{rows}</table>'
         '</div>'
     ) if rows else ""
+
+
+def send_wallet_alert(wallet_result: Dict, opts: Dict) -> bool:
+    alerts = wallet_result.get("alerts", []) or []
+    if not alerts:
+        return True
+
+    sender    = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
+    recipient = opts.get("email_to")
+    if not sender or not recipient:
+        log.error("[WALLET EMAIL] sender/recipient mancanti")
+        return False
+
+    summary = wallet_result.get("summary", {}) or {}
+    cards = ""
+    for alert in alerts:
+        rec = alert.get("recommendation", "HOLD")
+        action = alert.get("signal_action", "HOLD")
+        col = "#DC2626" if rec in ("SELL", "RISK_EXIT", "REDUCE", "TAKE_PROFIT") else "#16A34A" if rec in ("BUY", "ACCUMULATE") else "#F59E0B"
+        reasons = "".join(
+            f'<li style="margin-bottom:4px">{reason}</li>'
+            for reason in (alert.get("reasons") or [])[:4]
+        )
+        pnl = alert.get("pnl_pct")
+        pnl_html = ""
+        if pnl is not None:
+            pnl_html = f'<div style="font-size:11px;color:{"#16A34A" if pnl >= 0 else "#DC2626"};margin-top:6px">P/L non realizzato: {pnl:+.2f}%</div>'
+        cards += (
+            f'<div style="border:1px solid {col}33;border-left:4px solid {col};border-radius:8px;padding:14px 16px;margin-bottom:12px;background:#0B1220">'
+            f'<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'
+            f'<div><div style="font-size:18px;font-weight:800;color:#F9FAFB">{alert.get("symbol","?")}</div>'
+            f'<div style="font-size:11px;color:#9CA3AF">{alert.get("name","")}</div></div>'
+            f'<div style="text-align:right"><div style="font-size:11px;color:{col};font-weight:800">{rec}</div>'
+            f'<div style="font-size:10px;color:#9CA3AF">Segnale: {action} · conf. {alert.get("confidence",0)}%</div></div></div>'
+            f'<div style="font-size:12px;color:#D1D5DB;margin-top:10px">Prezzo attuale: <b>{alert.get("current_price","—")}</b> · Orizzonte stimato: <b>{alert.get("holding_days_estimate","—")} giorni</b></div>'
+            f'{pnl_html}'
+            f'<ul style="margin:10px 0 0 18px;padding:0;color:#C7D2FE;font-size:11px;line-height:1.6">{reasons}</ul>'
+            f'</div>'
+        )
+
+    html = (
+        '<html><body style="background:#07090D;color:#D0DFF8;font-family:Segoe UI,Arial,sans-serif;padding:20px">'
+        '<div style="max-width:760px;margin:0 auto">'
+        '<div style="font-size:22px;font-weight:900;color:#F9FAFB;margin-bottom:6px">Alert Wallet</div>'
+        '<div style="font-size:12px;color:#94A3B8;margin-bottom:18px">Sono stati rilevati segnali rilevanti sul tuo portafoglio.</div>'
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">'
+        f'<div style="background:#0B1220;border:1px solid #1F2937;border-radius:8px;padding:10px 12px">Posizioni: <b>{summary.get("holdings_count",0)}</b></div>'
+        f'<div style="background:#0B1220;border:1px solid #1F2937;border-radius:8px;padding:10px 12px">Valore: <b>{summary.get("market_value_total",0):,.2f}</b></div>'
+        f'<div style="background:#0B1220;border:1px solid #1F2937;border-radius:8px;padding:10px 12px">P/L: <b>{summary.get("pnl_total",0):+,.2f}</b></div>'
+        '</div>'
+        f'{cards}'
+        '<div style="margin-top:16px;font-size:10px;color:#64748B">Messaggio generato automaticamente da Market Analyze. Valuta sempre rischio, liquidità e conferme operative.</div>'
+        '</div></body></html>'
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"[Market Analyze] Alert wallet: {len(alerts)} segnale/i rilevanti"
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    return _dispatch_email(msg, opts)
 
 
 # ── Card segnale completa ─────────────────────────────────────────────────────

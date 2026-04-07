@@ -17,7 +17,7 @@ from scoring_engine         import run_composite_scanner, enrich_with_smart_mone
 from signal_engine          import run_scanner, build_quant_signal, is_trading_hours
 from ai_validation          import apply_ai_enrichment
 from backtest_engine        import backtest_symbol, backtest_batch, BacktestConfig
-from mailer                 import send_report
+from mailer                 import send_report, send_wallet_alert
 from sector_rotation_layer  import fetch_sector_rotation, get_sector_score
 from institutional_layer    import fetch_institutional_score, fetch_all_institutional
 import db
@@ -41,8 +41,10 @@ def load_options() -> dict:
         "perplexity_api_key":         os.getenv("PERPLEXITY_API_KEY",""),
         "score_threshold":            int(os.getenv("SCORE_THRESHOLD","25")),
         "scheduler_interval_minutes": int(os.getenv("SCHEDULER_MINUTES","60")),
+        "wallet_scheduler_minutes":   int(os.getenv("WALLET_SCHEDULER_MINUTES","15")),
         "scheduler_enabled":          True,
         "email_enabled":              False,
+        "wallet_email_alerts_enabled": True,
         "email_to":   os.getenv("EMAIL_TO",""),    "email_from": os.getenv("EMAIL_FROM",""),
         "smtp_host":  os.getenv("SMTP_HOST","smtp.gmail.com"),
         "smtp_port":  int(os.getenv("SMTP_PORT","587")),
@@ -74,7 +76,9 @@ MACRO_ENABLED     = bool(OPTIONS.get("enable_macro_layer", True))
 FUND_ENABLED      = bool(OPTIONS.get("enable_fundamental_layer", False))
 MACRO_UPDATE_H    = int(OPTIONS.get("macro_update_hours", 4))
 SCHEDULER_MINUTES = int(OPTIONS.get("scheduler_interval_minutes",60))
+WALLET_SCHEDULER_MINUTES = int(OPTIONS.get("wallet_scheduler_minutes",15))
 SCHEDULER_ENABLED = bool(OPTIONS.get("scheduler_enabled",True))
+WALLET_ALERTS_ENABLED = bool(OPTIONS.get("wallet_email_alerts_enabled", OPTIONS.get("email_enabled", False)))
 BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
 PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
@@ -97,6 +101,227 @@ def _load_all_assets() -> list:
         return json.load(open(p, encoding="utf-8"))
     return []
 
+
+def _load_wallet_holdings() -> list:
+    if db.is_enabled():
+        return db.load_wallet_holdings()
+    return []
+
+
+def _find_asset_metadata(symbol: str) -> dict:
+    sym = symbol.strip().upper()
+    for asset in _load_all_assets():
+        if asset.get("symbol", "").upper() == sym:
+            return asset
+    return {"symbol": sym, "name": sym, "full_name": sym}
+
+
+def _normalize_wallet_holding(data: dict) -> dict:
+    base = _find_asset_metadata(data.get("symbol", ""))
+    merged = {**base, **data}
+    merged["symbol"] = merged.get("symbol", "").strip().upper()
+    merged["name"] = merged.get("name") or merged["symbol"]
+    merged["full_name"] = merged.get("full_name") or merged["name"]
+    merged["quantity"] = float(merged.get("quantity") or 0)
+    merged["avg_price"] = float(merged.get("avg_price") or 0)
+    merged["horizon_days"] = max(1, int(merged.get("horizon_days") or 30))
+    return merged
+
+
+def _recommendation_from_signal(signal: dict, holding: dict, current_price: Optional[float]) -> dict:
+    action = (signal or {}).get("action", "HOLD")
+    confidence = int((signal or {}).get("confidence") or 0)
+    quantity = float(holding.get("quantity") or 0)
+    avg_price = float(holding.get("avg_price") or 0)
+    pnl_pct = 0.0
+    if current_price and avg_price:
+        pnl_pct = round(((current_price - avg_price) / avg_price) * 100, 2)
+
+    recommendation = "HOLD"
+    alert_type = None
+    relevant = False
+    if action == "SELL":
+        recommendation = "SELL"
+        alert_type = "SELL_SIGNAL"
+        relevant = True
+    elif action == "BUY":
+        recommendation = "ACCUMULATE" if quantity > 0 else "BUY"
+        alert_type = "BUY_SIGNAL"
+        relevant = True
+    elif action == "WATCHLIST":
+        recommendation = "HOLD_WATCH"
+        if confidence >= 75:
+            alert_type = "WATCH_ESCALATION"
+            relevant = True
+
+    if holding.get("stop_loss") and current_price and current_price <= float(holding["stop_loss"]):
+        recommendation = "RISK_EXIT"
+        alert_type = "STOP_LOSS"
+        relevant = True
+
+    target_price = holding.get("target_price")
+    if target_price and current_price and current_price >= float(target_price):
+        recommendation = "TAKE_PROFIT"
+        alert_type = "TARGET_REACHED"
+        relevant = True
+
+    if pnl_pct <= -8 and recommendation not in ("SELL", "RISK_EXIT"):
+        recommendation = "REDUCE"
+        alert_type = alert_type or "DRAWDOWN"
+        relevant = True
+
+    hold_days = holding.get("horizon_days") or 30
+    if recommendation in ("SELL", "RISK_EXIT", "TAKE_PROFIT", "REDUCE"):
+        hold_days = min(hold_days, 3)
+    elif recommendation in ("BUY", "ACCUMULATE"):
+        hold_days = max(10, hold_days)
+    elif recommendation == "HOLD_WATCH":
+        hold_days = min(max(5, hold_days // 2), 15)
+
+    rationale = []
+    if action == "BUY":
+        rationale.append("Il motore segnali vede forza rialzista sul titolo.")
+    elif action == "SELL":
+        rationale.append("Il motore segnali rileva deterioramento tecnico o rischio di inversione.")
+    elif action == "WATCHLIST":
+        rationale.append("Il titolo va monitorato per conferme prima di aumentare o alleggerire la posizione.")
+    else:
+        rationale.append("Non ci sono segnali operativi forti, quindi la posizione resta in osservazione.")
+    if pnl_pct:
+        rationale.append(f"Performance non realizzata: {pnl_pct:+.2f}% rispetto al prezzo medio.")
+    if holding.get("target_price"):
+        rationale.append(f"Target impostato a {holding['target_price']}.")
+    if holding.get("stop_loss"):
+        rationale.append(f"Stop loss impostato a {holding['stop_loss']}.")
+
+    return {
+        "signal_action": action,
+        "recommendation": recommendation,
+        "confidence": confidence,
+        "holding_days_estimate": int(hold_days),
+        "alert_type": alert_type,
+        "is_relevant": relevant,
+        "rationale": rationale,
+        "pnl_pct": pnl_pct,
+    }
+
+
+def run_wallet_review(force_email: bool = False) -> dict:
+    if state["wallet_running"]:
+        return state.get("wallet") or {"summary": {}, "holdings": [], "alerts": []}
+
+    holdings = [h for h in _load_wallet_holdings() if h.get("enabled", True)]
+    if not holdings:
+        result = {"summary": {"holdings_count": 0}, "holdings": [], "alerts": [], "history": []}
+        now = datetime.utcnow()
+        state.update({
+            "wallet": result,
+            "wallet_last_run": now.isoformat() + "Z",
+            "wallet_next_run": (now + timedelta(minutes=WALLET_SCHEDULER_MINUTES)).isoformat() + "Z",
+        })
+        return result
+
+    state["wallet_running"] = True
+    try:
+        symbols = [h["symbol"] for h in holdings]
+        tech = fetch_all(symbols)
+        signal_index = {s["symbol"]: s for s in state.get("signals", [])}
+        analyzed = []
+        alerts = []
+        invested_total = market_value_total = pnl_total = 0.0
+
+        for holding in holdings:
+            sym = holding["symbol"]
+            signal = signal_index.get(sym)
+            if signal is None:
+                signal = build_quant_signal(tech.get(sym), holding)
+                signal["symbol"] = sym
+                signal["name"] = holding.get("name", sym)
+            current_price = (signal or {}).get("price")
+            quantity = float(holding.get("quantity") or 0)
+            avg_price = float(holding.get("avg_price") or 0)
+            invested_amount = round(quantity * avg_price, 2)
+            market_value = round(quantity * float(current_price or 0), 2)
+            pnl_amount = round(market_value - invested_amount, 2)
+
+            rec = _recommendation_from_signal(signal, holding, current_price)
+            holding_view = {
+                **holding,
+                "current_price": current_price,
+                "invested_amount": invested_amount,
+                "market_value": market_value,
+                "pnl_amount": pnl_amount,
+                "pnl_pct": rec["pnl_pct"],
+                "signal_action": rec["signal_action"],
+                "recommendation": rec["recommendation"],
+                "confidence": rec["confidence"],
+                "holding_days_estimate": rec["holding_days_estimate"],
+                "reasons": rec["rationale"],
+                "signal": signal,
+            }
+            analyzed.append(holding_view)
+            invested_total += invested_amount
+            market_value_total += market_value
+            pnl_total += pnl_amount
+
+            if rec["is_relevant"] and holding.get("alert_enabled", True):
+                prior = db.get_recent_wallet_alert(sym, rec["alert_type"], within_hours=12) if db.is_enabled() and rec["alert_type"] else None
+                should_alert = force_email or not prior or prior.get("recommendation") != rec["recommendation"]
+                if should_alert:
+                    alert_payload = {
+                        "symbol": sym,
+                        "name": holding.get("name", sym),
+                        "recommendation": rec["recommendation"],
+                        "signal_action": rec["signal_action"],
+                        "confidence": rec["confidence"],
+                        "current_price": current_price,
+                        "pnl_pct": rec["pnl_pct"],
+                        "holding_days_estimate": rec["holding_days_estimate"],
+                        "reasons": rec["rationale"],
+                    }
+                    alerts.append(alert_payload)
+                    if db.is_enabled() and rec["alert_type"]:
+                        db.save_wallet_alert(sym, rec["alert_type"], rec["recommendation"], rec["confidence"], alert_payload)
+
+        pnl_pct_total = round((pnl_total / invested_total) * 100, 2) if invested_total else 0.0
+        analyzed.sort(key=lambda item: (item["recommendation"] in ("SELL", "RISK_EXIT", "TAKE_PROFIT", "REDUCE"), item["confidence"]), reverse=True)
+        now = datetime.utcnow()
+        result = {
+            "summary": {
+                "holdings_count": len(analyzed),
+                "invested_total": round(invested_total, 2),
+                "market_value_total": round(market_value_total, 2),
+                "pnl_total": round(pnl_total, 2),
+                "pnl_pct_total": pnl_pct_total,
+                "alert_count": len(alerts),
+            },
+            "holdings": analyzed,
+            "alerts": alerts,
+            "run_at": now.isoformat() + "Z",
+            "next_run": (now + timedelta(minutes=WALLET_SCHEDULER_MINUTES)).isoformat() + "Z",
+        }
+
+        if db.is_enabled():
+            try:
+                db.save_wallet_analysis_run(result)
+            except Exception as e:
+                log.error(f"[DB] save_wallet_analysis_run: {e}")
+
+        if alerts and OPTIONS.get("email_enabled") and WALLET_ALERTS_ENABLED:
+            try:
+                send_wallet_alert(result, OPTIONS)
+            except Exception as e:
+                log.error(f"[WALLET] send_wallet_alert: {e}")
+
+        state.update({
+            "wallet": result,
+            "wallet_last_run": result["run_at"],
+            "wallet_next_run": result["next_run"],
+        })
+        return result
+    finally:
+        state["wallet_running"] = False
+
 # Modello Pydantic per asset
 class AssetModel(BaseModel):
     symbol:     str
@@ -111,6 +336,26 @@ class AssetModel(BaseModel):
     enabled:    bool = True
     note:       str = ""
 
+
+class WalletHoldingModel(BaseModel):
+    symbol:        str
+    quantity:      float
+    avg_price:     float
+    name:          str = ""
+    full_name:     str = ""
+    isin:          str = ""
+    market:        str = "US"
+    country:       str = "US"
+    asset_type:    str = "stock"
+    currency:      str = "USD"
+    exchange:      str = ""
+    target_price:  Optional[float] = None
+    stop_loss:     Optional[float] = None
+    horizon_days:  int = 30
+    alert_enabled: bool = True
+    enabled:       bool = True
+    note:          str = ""
+
 # â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 state = {
     "last_run":    None,
@@ -123,6 +368,10 @@ state = {
     "smart_money":    None,
     "macro_context":  None,
     "fund_data":      {},
+    "wallet":         None,
+    "wallet_last_run": None,
+    "wallet_next_run": None,
+    "wallet_running": False,
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -353,12 +602,16 @@ def _scheduler_loop():
     """
     log.info(f"[SCHEDULER] thread avviato | intervallo={SCHEDULER_MINUTES}min | finestra=08:00-23:30")
     last_run_at = None  # timestamp ultimo run completato
+    last_wallet_run_at = None
 
     # Prima scansione solo se siamo dentro la finestra
     if is_trading_hours():
         log.info("[SCHEDULER] Prima scansione avviata (siamo in finestra)")
         run_scan()
         last_run_at = datetime.utcnow()
+        if _load_wallet_holdings():
+            run_wallet_review()
+            last_wallet_run_at = datetime.utcnow()
     else:
         log.info("[SCHEDULER] Fuori finestra operativa - prima scansione posticipata alle 08:00")
 
@@ -378,6 +631,12 @@ def _scheduler_loop():
             log.info(f"[SCHEDULER] Avvio scansione (ultima: {last_run_at.strftime('%H:%M') if last_run_at else 'mai'})")
             run_scan()
             last_run_at = datetime.utcnow()
+        if _load_wallet_holdings() and (
+            last_wallet_run_at is None or (now - last_wallet_run_at).total_seconds() >= WALLET_SCHEDULER_MINUTES * 60
+        ):
+            log.info(f"[WALLET] Avvio controllo portafoglio (ultima: {last_wallet_run_at.strftime('%H:%M') if last_wallet_run_at else 'mai'})")
+            run_wallet_review()
+            last_wallet_run_at = datetime.utcnow()
 
 
 # â"€â"€ FastAPI â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -409,15 +668,18 @@ async def health():
     return {"status":"ok","version":"2.0.0",
             "assets":len(ASSETS),"anthropic":bool(CLAUDE_KEY),"perplexity":bool(PPLX_KEY),
             "trading_window":is_trading_hours(),"bind":BIND_HOST,
-            "email_enabled":bool(OPTIONS.get("email_enabled"))}
+            "email_enabled":bool(OPTIONS.get("email_enabled")),
+            "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES}
 
 @app.get("/api/config")
 async def config():
     return {"scheduler_minutes":SCHEDULER_MINUTES,"scheduler_enabled":SCHEDULER_ENABLED,
+            "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES,
             "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
             "has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
             "email_enabled":bool(OPTIONS.get("email_enabled")),
+            "wallet_email_alerts_enabled": WALLET_ALERTS_ENABLED,
             "email_to":OPTIONS.get("email_to",""),
             "smtp_host":OPTIONS.get("smtp_host",""),
             "smtp_port":OPTIONS.get("smtp_port",587),
@@ -520,6 +782,83 @@ async def delete_asset(symbol: str):
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
     log.info(f"[ASSETS] Eliminato: {sym}")
     return {"status": "deleted", "symbol": sym, "remaining": len(all_assets)}
+
+
+@app.get("/api/wallet")
+async def get_wallet():
+    wallet = state.get("wallet")
+    if not wallet:
+        wallet = run_wallet_review()
+    return {
+        "holdings_count": len(_load_wallet_holdings()),
+        "last_run": state.get("wallet_last_run"),
+        "next_run": state.get("wallet_next_run"),
+        **wallet,
+    }
+
+
+@app.get("/api/wallet/holdings")
+async def get_wallet_holdings():
+    holdings = _load_wallet_holdings()
+    return {"count": len(holdings), "holdings": holdings}
+
+
+@app.post("/api/wallet/holdings")
+async def add_wallet_holding(holding: WalletHoldingModel):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
+    normalized = _normalize_wallet_holding(holding.model_dump())
+    if normalized["quantity"] <= 0:
+        raise HTTPException(400, "quantity deve essere > 0")
+    if normalized["avg_price"] <= 0:
+        raise HTTPException(400, "avg_price deve essere > 0")
+    db.save_wallet_holding(normalized)
+    wallet = run_wallet_review()
+    return {"status": "added", "holding": normalized, "wallet": wallet}
+
+
+@app.put("/api/wallet/holdings/{symbol}")
+async def update_wallet_holding(symbol: str, holding: WalletHoldingModel):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
+    normalized = _normalize_wallet_holding({**holding.model_dump(), "symbol": symbol.upper()})
+    if normalized["quantity"] <= 0:
+        raise HTTPException(400, "quantity deve essere > 0")
+    if normalized["avg_price"] <= 0:
+        raise HTTPException(400, "avg_price deve essere > 0")
+    db.save_wallet_holding(normalized)
+    wallet = run_wallet_review()
+    return {"status": "updated", "holding": normalized, "wallet": wallet}
+
+
+@app.delete("/api/wallet/holdings/{symbol}")
+async def remove_wallet_holding(symbol: str):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
+    if not db.delete_wallet_holding(symbol.upper()):
+        raise HTTPException(404, f"Posizione {symbol.upper()} non trovata")
+    wallet = run_wallet_review()
+    return {"status": "deleted", "symbol": symbol.upper(), "wallet": wallet}
+
+
+@app.post("/api/wallet/refresh")
+async def refresh_wallet(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_wallet_review, True)
+    return {"status": "started"}
+
+
+@app.get("/api/wallet/history")
+async def get_wallet_history(days: int = 7):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato")
+    return {"days": days, "runs": db.get_wallet_history(days)}
+
+
+@app.get("/api/wallet/history/{symbol}")
+async def get_wallet_position_history(symbol: str, days: int = 30):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato")
+    return {"symbol": symbol.upper(), "days": days, "history": db.get_wallet_position_history(symbol, days)}
 
 @app.get("/api/assets/lookup")
 async def lookup_asset_by_isin(isin: str):

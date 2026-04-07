@@ -149,6 +149,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 <!-- TABS -->
 <div class="tabs">
   <div class="tab active" onclick="showTab('signals')">⊕ Segnali</div>
+  <div class="tab" onclick="showTab('wallet')">💼 Wallet</div>
   <div class="tab" onclick="showTab('assets')">◈ Asset</div>
   <div class="tab" onclick="showTab('backtest')">⊞ Backtest</div>
   <div class="tab" onclick="showTab('log')">▶ Log</div>
@@ -463,6 +464,73 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   </div>
 </div>
 
+<!-- ═══════════════════ TAB: WALLET ═══════════════════ -->
+<div class="tc" id="tab-wallet">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div style="font-size:16px;font-weight:700;color:#F9FAFB">💼 Wallet Intelligence</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:3px">Valore attuale, P/L, suggerimento operativo e alert mail su segnali critici</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="spin" id="wallet-spin"></div>
+      <button class="btn" onclick="refreshWallet()">↻ Aggiorna wallet</button>
+    </div>
+  </div>
+
+  <div class="cfg-banner" style="margin-bottom:14px">
+    <span id="wallet-meta">In attesa del primo controllo wallet...</span>
+    <span id="wallet-sched" style="margin-left:auto;color:#6880A0"></span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:12px;align-items:start">
+    <div class="panel">
+      <div class="ph">➕ Posizione</div>
+      <div class="pb">
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">SIMBOLO</div><input id="wh-symbol" type="text" placeholder="AAPL" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">NOME</div><input id="wh-name" type="text" placeholder="Apple" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">QUANTITÀ</div><input id="wh-qty" type="number" step="0.0001" placeholder="10" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">PREZZO MEDIO</div><input id="wh-avg" type="number" step="0.0001" placeholder="175.50" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">TARGET</div><input id="wh-target" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">STOP LOSS</div><input id="wh-stop" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">MERCATO</div><select id="wh-market" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"><option value="US">USA</option><option value="IT">Italia</option><option value="EU">Europa</option></select></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ORIZZONTE (GIORNI)</div><input id="wh-horizon" type="number" min="1" step="1" value="30" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
+        </div>
+        <div style="margin-top:10px"><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">NOTE</div><textarea id="wh-note" rows="3" placeholder="Motivo ingresso, setup, nota personale..." style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px;resize:vertical"></textarea></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="btn" style="background:#16A34A;border-color:#16A34A;color:#fff" onclick="saveWalletHolding()">Salva posizione</button>
+          <button class="btn" onclick="resetWalletForm()">Pulisci</button>
+          <span id="wallet-form-msg" style="font-size:11px;color:#6880A0"></span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div id="wallet-summary" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px"></div>
+      <div class="panel">
+        <div class="ph">⏱ Storico controllo</div>
+        <div class="pb" id="wallet-history">Caricamento...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="ph">📋 Posizioni monitorate</div>
+    <div class="pb" style="padding:0">
+      <div style="overflow:auto">
+        <table class="trade-table" style="width:100%">
+          <thead><tr><th>Simbolo</th><th>Qty</th><th>Prezzo medio</th><th>Ultimo</th><th>P/L</th><th>Azione</th><th>Orizzonte</th><th></th></tr></thead>
+          <tbody id="wallet-holdings-body">
+            <tr><td colspan="8" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione inserita</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="wallet-cards" style="margin-top:12px"></div>
+</div>
+
 <!-- ═══════════════════ TAB: SMART MONEY ═══════════════════ -->
 <div class="tc" id="tab-smartmoney">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -510,16 +578,20 @@ function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 let allSignals = [];
 let fltMkt = 'all', fltAct = 'all';
 let cfg = {};
+let walletData = null;
+let walletHoldings = [];
+let walletEditSymbol = null;
 
 // ════════════════════════════════════════════════════════════
 //  TABS
 // ════════════════════════════════════════════════════════════
-const TAB_IDS = ['signals','assets','backtest','log','settings','smartmoney'];
+const TAB_IDS = ['signals','wallet','assets','backtest','log','settings','smartmoney'];
 function showTab(id){
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active', TAB_IDS[i]===id));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el = document.getElementById('tab-'+id);
   if(el) el.classList.add('active');
+  if(id==='wallet')     loadWallet();
   if(id==='assets')     loadAssets();
   if(id==='settings')   loadSettings();
   if(id==='smartmoney') loadSM();
@@ -1078,6 +1150,212 @@ async function refreshScanner(){
 }
 
 // ════════════════════════════════════════════════════════════
+//  WALLET
+// ════════════════════════════════════════════════════════════
+function walletRecColor(rec){
+  return ['SELL','RISK_EXIT','TAKE_PROFIT','REDUCE'].includes(rec) ? '#DC2626'
+    : ['BUY','ACCUMULATE'].includes(rec) ? '#16A34A'
+    : '#F59E0B';
+}
+
+function resetWalletForm(){
+  walletEditSymbol = null;
+  ['wh-symbol','wh-name','wh-qty','wh-avg','wh-target','wh-stop','wh-note'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('wh-market').value = 'US';
+  document.getElementById('wh-horizon').value = '30';
+  document.getElementById('wh-symbol').disabled = false;
+  document.getElementById('wallet-form-msg').textContent = '';
+}
+
+function fillWalletForm(h){
+  walletEditSymbol = h.symbol;
+  document.getElementById('wh-symbol').value = h.symbol || '';
+  document.getElementById('wh-symbol').disabled = true;
+  document.getElementById('wh-name').value = h.name || '';
+  document.getElementById('wh-qty').value = h.quantity || '';
+  document.getElementById('wh-avg').value = h.avg_price || '';
+  document.getElementById('wh-target').value = h.target_price || '';
+  document.getElementById('wh-stop').value = h.stop_loss || '';
+  document.getElementById('wh-market').value = h.market || 'US';
+  document.getElementById('wh-horizon').value = h.horizon_days || 30;
+  document.getElementById('wh-note').value = h.note || '';
+  document.getElementById('wallet-form-msg').textContent = 'Modifica posizione: '+h.symbol;
+}
+
+function renderWalletSummary(summary){
+  const el = document.getElementById('wallet-summary');
+  if(!summary || !summary.holdings_count){
+    el.innerHTML = '<div class="panel" style="grid-column:1/-1"><div class="pb" style="color:#6B7280">Inserisci almeno una posizione per attivare il controllo wallet ogni 15 minuti.</div></div>';
+    return;
+  }
+  const cards = [
+    ['Posizioni', summary.holdings_count, '#D0DFF8'],
+    ['Valore', (summary.market_value_total||0).toFixed(2), '#60A5FA'],
+    ['Investito', (summary.invested_total||0).toFixed(2), '#C8A020'],
+    ['P/L', ((summary.pnl_total||0)>=0?'+':'')+(summary.pnl_total||0).toFixed(2)+' ('+((summary.pnl_pct_total||0)>=0?'+':'')+(summary.pnl_pct_total||0).toFixed(2)+'%)', (summary.pnl_total||0)>=0?'#16A34A':'#DC2626'],
+  ];
+  el.innerHTML = cards.map(([lbl,val,col]) =>
+    '<div class="panel"><div class="pb">'
+    + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">'+lbl.toUpperCase()+'</div>'
+    + '<div style="font-size:22px;font-weight:800;color:'+col+'">'+val+'</div>'
+    + '</div></div>'
+  ).join('');
+}
+
+function renderWalletHistory(runs){
+  const el = document.getElementById('wallet-history');
+  if(!runs || !runs.length){
+    el.innerHTML = '<div style="color:#6B7280">Nessuno storico wallet disponibile.</div>';
+    return;
+  }
+  el.innerHTML = runs.slice(0,6).map(r =>
+    '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #19203022;font-size:11px">'
+    + '<span style="color:#9CA3AF">'+fmtTime(r.run_at)+'</span>'
+    + '<span style="color:'+(r.pnl_total>=0?'#16A34A':'#DC2626')+'">'+(r.pnl_total>=0?'+':'')+Number(r.pnl_total||0).toFixed(2)+'</span>'
+    + '<span style="color:#6B7280">'+(r.alert_count||0)+' alert</span>'
+    + '</div>'
+  ).join('');
+}
+
+function renderWalletHoldings(holdings){
+  const tbody = document.getElementById('wallet-holdings-body');
+  if(!holdings || !holdings.length){
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione inserita</td></tr>';
+    return;
+  }
+  tbody.innerHTML = holdings.map(h => {
+    const col = walletRecColor(h.recommendation || 'HOLD');
+    return '<tr>'
+      + '<td>'+escH(h.symbol)+'</td>'
+      + '<td>'+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</td>'
+      + '<td>'+Number(h.avg_price||0).toFixed(2)+'</td>'
+      + '<td>'+(h.current_price!=null?Number(h.current_price).toFixed(2):'—')+'</td>'
+      + '<td style="color:'+(Number(h.pnl_amount||0)>=0?'#16A34A':'#DC2626')+'">'+(Number(h.pnl_amount||0)>=0?'+':'')+Number(h.pnl_amount||0).toFixed(2)+'<br><span style="font-size:10px;color:#6B7280">'+(Number(h.pnl_pct||0)>=0?'+':'')+Number(h.pnl_pct||0).toFixed(2)+'%</span></td>'
+      + '<td style="color:'+col+';font-weight:700">'+escH(h.recommendation||'HOLD')+'<br><span style="font-size:10px;color:#6B7280">'+escH(h.signal_action||'HOLD')+' · '+Number(h.confidence||0)+'%</span></td>'
+      + '<td>'+Number(h.holding_days_estimate||0)+'g</td>'
+      + '<td><button class="btn" style="padding:4px 8px;font-size:10px;margin-right:4px" onclick="editWalletHolding(\''+h.symbol+'\')">✏</button><button class="btn" style="padding:4px 8px;font-size:10px;border-color:#DC262644;color:#DC2626" onclick="deleteWalletHolding(\''+h.symbol+'\')">🗑</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function renderWalletCards(holdings){
+  const box = document.getElementById('wallet-cards');
+  if(!holdings || !holdings.length){
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = holdings.map(h => {
+    const col = walletRecColor(h.recommendation || 'HOLD');
+    const reasons = (h.reasons||[]).slice(0,4).map(r => '<li style="margin-bottom:4px">'+escH(r)+'</li>').join('');
+    return '<div class="sig-card" style="margin-bottom:12px">'
+      + '<div class="sig-card-hdr" style="border-left:4px solid '+col+'">'
+      + '<div><div style="font-size:18px;font-weight:800;color:#F9FAFB">'+escH(h.symbol)+' <span style="font-size:12px;color:#6B7280">'+escH(h.name||'')+'</span></div>'
+      + '<div style="font-size:11px;color:#9CA3AF;margin-top:3px">Valore attuale: <b>'+(h.market_value!=null?Number(h.market_value).toFixed(2):'—')+'</b> · Quantità: '+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</div></div>'
+      + '<div style="text-align:right"><div style="font-size:12px;font-weight:800;color:'+col+'">'+escH(h.recommendation||'HOLD')+'</div>'
+      + '<div style="font-size:10px;color:#6B7280">Segnale '+escH(h.signal_action||'HOLD')+' · conf. '+Number(h.confidence||0)+'%</div></div></div>'
+      + '<div class="sig-card-body"><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px">'
+      + '<div class="ind-item"><div class="ind-lbl">PREZZO</div><div class="ind-val">'+(h.current_price!=null?Number(h.current_price).toFixed(2):'—')+'</div></div>'
+      + '<div class="ind-item"><div class="ind-lbl">PREZZO MEDIO</div><div class="ind-val">'+Number(h.avg_price||0).toFixed(2)+'</div></div>'
+      + '<div class="ind-item"><div class="ind-lbl">P/L</div><div class="ind-val" style="color:'+(Number(h.pnl_amount||0)>=0?'#16A34A':'#DC2626')+'">'+(Number(h.pnl_amount||0)>=0?'+':'')+Number(h.pnl_amount||0).toFixed(2)+'</div><div class="ind-note">'+(Number(h.pnl_pct||0)>=0?'+':'')+Number(h.pnl_pct||0).toFixed(2)+'%</div></div>'
+      + '<div class="ind-item"><div class="ind-lbl">ORIZZONTE</div><div class="ind-val">'+Number(h.holding_days_estimate||0)+' giorni</div></div>'
+      + '</div>'
+      + '<div style="font-size:9px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Perché</div>'
+      + '<ul style="margin:0 0 0 18px;color:#D1D5DB;font-size:11px;line-height:1.6">'+reasons+'</ul>'
+      + '</div></div>';
+  }).join('');
+}
+
+async function loadWallet(){
+  try{
+    const [walletRes, histRes] = await Promise.all([
+      fetch(api('/api/wallet')),
+      fetch(api('/api/wallet/history?days=3')),
+    ]);
+    const wallet = await walletRes.json();
+    const history = histRes.ok ? await histRes.json() : {runs:[]};
+    walletData = wallet;
+    walletHoldings = wallet.holdings || [];
+    document.getElementById('wallet-meta').innerHTML =
+      'Ultimo controllo: <b style="color:#D0DFF8">'+(wallet.last_run?fmtTime(wallet.last_run):'—')+'</b>'
+      + ' · Prossimo: <b style="color:#D0DFF8">'+(wallet.next_run?fmtTime(wallet.next_run):'—')+'</b>'
+      + ' · Alert attivi: <b style="color:#C8A020">'+((wallet.alerts||[]).length)+'</b>';
+    document.getElementById('wallet-sched').textContent = 'Auto-check ogni '+(cfg.wallet_scheduler_minutes||15)+' min';
+    renderWalletSummary(wallet.summary || {});
+    renderWalletHistory(history.runs || []);
+    renderWalletHoldings(walletHoldings);
+    renderWalletCards(walletHoldings);
+  }catch(e){
+    document.getElementById('wallet-meta').textContent = 'Errore wallet: '+e.message;
+  }
+}
+
+async function saveWalletHolding(){
+  const payload = {
+    symbol: document.getElementById('wh-symbol').value.trim().toUpperCase(),
+    name: document.getElementById('wh-name').value.trim(),
+    quantity: Number(document.getElementById('wh-qty').value),
+    avg_price: Number(document.getElementById('wh-avg').value),
+    target_price: document.getElementById('wh-target').value ? Number(document.getElementById('wh-target').value) : null,
+    stop_loss: document.getElementById('wh-stop').value ? Number(document.getElementById('wh-stop').value) : null,
+    market: document.getElementById('wh-market').value,
+    horizon_days: Number(document.getElementById('wh-horizon').value || 30),
+    note: document.getElementById('wh-note').value.trim(),
+  };
+  const msg = document.getElementById('wallet-form-msg');
+  if(!payload.symbol || !payload.quantity || !payload.avg_price){
+    msg.style.color = '#DC2626';
+    msg.textContent = 'Compila simbolo, quantità e prezzo medio.';
+    return;
+  }
+  try{
+    const url = walletEditSymbol ? api('/api/wallet/holdings/'+encodeURIComponent(walletEditSymbol)) : api('/api/wallet/holdings');
+    const method = walletEditSymbol ? 'PUT' : 'POST';
+    const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Salvataggio non riuscito');
+    msg.style.color = '#16A34A';
+    msg.textContent = walletEditSymbol ? 'Posizione aggiornata.' : 'Posizione aggiunta.';
+    resetWalletForm();
+    await loadWallet();
+  }catch(e){
+    msg.style.color = '#DC2626';
+    msg.textContent = e.message;
+  }
+}
+
+function editWalletHolding(symbol){
+  const h = walletHoldings.find(item => item.symbol === symbol);
+  if(h) fillWalletForm(h);
+}
+
+async function deleteWalletHolding(symbol){
+  if(!confirm('Eliminare la posizione '+symbol+'?')) return;
+  try{
+    const r = await fetch(api('/api/wallet/holdings/'+encodeURIComponent(symbol)), {method:'DELETE'});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Eliminazione non riuscita');
+    resetWalletForm();
+    await loadWallet();
+  }catch(e){
+    document.getElementById('wallet-form-msg').style.color = '#DC2626';
+    document.getElementById('wallet-form-msg').textContent = e.message;
+  }
+}
+
+async function refreshWallet(){
+  const sp = document.getElementById('wallet-spin');
+  sp.classList.add('on');
+  try{
+    await fetch(api('/api/wallet/refresh'), {method:'POST'});
+    await new Promise(r=>setTimeout(r,2500));
+    await loadWallet();
+  }catch(e){
+    document.getElementById('wallet-meta').textContent = 'Errore refresh wallet: '+e.message;
+  }
+  sp.classList.remove('on');
+}
+
+// ════════════════════════════════════════════════════════════
 //  ASSETS — CRUD
 // ════════════════════════════════════════════════════════════
 let _allAssets   = [];   // tutti gli asset (inclusi disabled)
@@ -1406,6 +1684,7 @@ async function loadSettings(){
     document.getElementById('cfg-sched').innerHTML =
       '<div style="font-size:11px;line-height:2.4;color:#6880A0">'
       + 'Intervallo: <b style="color:#C8A020">ogni '+cfg.scheduler_minutes+' minuti</b><br>'
+      + 'Wallet: <b style="color:#C8A020">ogni '+(cfg.wallet_scheduler_minutes||15)+' minuti</b><br>'
       + 'Attivo: <span style="color:'+(cfg.scheduler_enabled?'#16A34A':'#DC2626')+'">'+(cfg.scheduler_enabled?'✓ attivo':'✗ disabilitato')+'</span><br>'
       + 'Finestra: <b style="color:'+wc+'">08:00 – 23:30 ('+wl+')</b>'
       + '</div>';
@@ -1413,7 +1692,7 @@ async function loadSettings(){
     document.getElementById('cfg-email').innerHTML =
       '<div style="font-size:11px;line-height:2.4;color:#6880A0">'
       + 'Abilitata: <span style="color:'+(cfg.email_enabled?'#16A34A':'#6B7280')+'">'+(cfg.email_enabled?'✓':'✗ — imposta email_enabled: true nel config')+'</span>'
-      + (cfg.email_enabled?'<br>A: <b style="color:#D0DFF8">'+cfg.email_to+'</b><br>Score minimo: <b style="color:#C8A020">'+cfg.email_min_score+'</b>':'')
+      + (cfg.email_enabled?'<br>A: <b style="color:#D0DFF8">'+cfg.email_to+'</b><br>Score minimo: <b style="color:#C8A020">'+cfg.email_min_score+'</b><br>Alert wallet: <b style="color:'+(cfg.wallet_email_alerts_enabled?'#16A34A':'#6B7280')+'">'+(cfg.wallet_email_alerts_enabled?'attivi':'disattivi')+'</b>':'')
       + '</div>';
 
   }catch(e){ console.error('loadSettings:', e); }
@@ -1746,6 +2025,12 @@ window.refreshScanner= refreshScanner;
 window.runBacktest   = runBacktest;
 window.testEmail     = testEmail;
 window.loadAssets    = loadAssets;
+window.loadWallet    = loadWallet;
+window.saveWalletHolding = saveWalletHolding;
+window.resetWalletForm = resetWalletForm;
+window.editWalletHolding = editWalletHolding;
+window.deleteWalletHolding = deleteWalletHolding;
+window.refreshWallet = refreshWallet;
 window.loadSectorRotation = loadSectorRotation;
 window.openAddForm   = openAddForm;
 window.openEditForm  = openEditForm;

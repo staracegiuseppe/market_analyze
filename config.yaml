@@ -31,11 +31,13 @@ options:
   eia_api_key: ""
   score_threshold: 25
   scheduler_interval_minutes: 60
+  wallet_scheduler_minutes: 15
   scheduler_enabled: true
   enable_macro_layer: true
   enable_fundamental_layer: false
   macro_update_hours: 4
   email_enabled: false
+  wallet_email_alerts_enabled: true
   email_to: ""
   email_from: ""
   oauth2_client_id: ""
@@ -61,11 +63,13 @@ schema:
   eia_api_key: str
   score_threshold: int
   scheduler_interval_minutes: int
+  wallet_scheduler_minutes: int
   scheduler_enabled: bool
   enable_macro_layer: bool
   enable_fundamental_layer: bool
   macro_update_hours: int
   email_enabled: bool
+  wallet_email_alerts_enabled: bool
   email_to: str
   email_from: str
   oauth2_client_id: str
