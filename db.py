@@ -200,6 +200,18 @@ def _create_schema():
             INDEX idx_wallet_alert_symbol_created (symbol, created_at)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS income_plan_runs (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            run_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            scenario              VARCHAR(32),
+            risk_level            VARCHAR(16),
+            monthly_income_est    DECIMAL(18,2) DEFAULT 0,
+            target_capital        DECIMAL(18,2) DEFAULT 0,
+            gap_to_target         DECIMAL(18,2) DEFAULT 0,
+            plan_json             MEDIUMTEXT
+        )
+        """,
     ]
     conn = _connect()
     try:
@@ -764,6 +776,63 @@ def save_wallet_alert(symbol: str, alert_type: str, recommendation: str, confide
     except Exception as e:
         log.error(f"[DB] save_wallet_alert ({symbol}, {alert_type}): {e}")
         return False
+
+
+def save_income_plan(plan: Dict) -> Optional[int]:
+    if not _enabled:
+        return None
+    try:
+        summary = plan.get("summary", {})
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO income_plan_runs
+                    (scenario, risk_level, monthly_income_est, target_capital, gap_to_target, plan_json)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                plan.get("market_scenario", ""),
+                plan.get("risk_level", ""),
+                summary.get("estimated_monthly_income", 0),
+                summary.get("target_capital_for_goal", 0),
+                summary.get("gap_to_target", 0),
+                json.dumps(plan, default=str),
+            ))
+            run_id = cur.lastrowid
+        conn.close()
+        return run_id
+    except Exception as e:
+        log.error(f"[DB] save_income_plan: {e}")
+        return None
+
+
+def get_income_history(days: int = 7) -> List[Dict]:
+    if not _enabled:
+        return []
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, run_at, scenario, risk_level, monthly_income_est, target_capital, gap_to_target
+                FROM income_plan_runs
+                WHERE run_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                ORDER BY run_at DESC
+                LIMIT 200
+            """, (days,))
+            rows = cur.fetchall()
+        conn.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d.get("run_at") and hasattr(d["run_at"], "isoformat"):
+                d["run_at"] = d["run_at"].isoformat()
+            for key in ("monthly_income_est", "target_capital", "gap_to_target"):
+                if d.get(key) is not None:
+                    d[key] = float(d[key])
+            out.append(d)
+        return out
+    except Exception as e:
+        log.error(f"[DB] get_income_history: {e}")
+        return []
 
 
 # ── Query trend ────────────────────────────────────────────────────────────────

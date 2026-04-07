@@ -42,6 +42,7 @@ def load_options() -> dict:
         "score_threshold":            int(os.getenv("SCORE_THRESHOLD","25")),
         "scheduler_interval_minutes": int(os.getenv("SCHEDULER_MINUTES","60")),
         "wallet_scheduler_minutes":   int(os.getenv("WALLET_SCHEDULER_MINUTES","15")),
+        "income_scheduler_minutes":   int(os.getenv("INCOME_SCHEDULER_MINUTES","30")),
         "scheduler_enabled":          True,
         "email_enabled":              False,
         "wallet_email_alerts_enabled": True,
@@ -77,6 +78,7 @@ FUND_ENABLED      = bool(OPTIONS.get("enable_fundamental_layer", False))
 MACRO_UPDATE_H    = int(OPTIONS.get("macro_update_hours", 4))
 SCHEDULER_MINUTES = int(OPTIONS.get("scheduler_interval_minutes",60))
 WALLET_SCHEDULER_MINUTES = int(OPTIONS.get("wallet_scheduler_minutes",15))
+INCOME_SCHEDULER_MINUTES = int(OPTIONS.get("income_scheduler_minutes",30))
 SCHEDULER_ENABLED = bool(OPTIONS.get("scheduler_enabled",True))
 WALLET_ALERTS_ENABLED = bool(OPTIONS.get("wallet_email_alerts_enabled", OPTIONS.get("email_enabled", False)))
 BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
@@ -128,11 +130,54 @@ def _normalize_wallet_holding(data: dict) -> dict:
     return merged
 
 
+def _upsert_wallet_from_asset(asset: dict, quantity: Optional[float] = None, avg_price: Optional[float] = None,
+                              target_price: Optional[float] = None, stop_loss: Optional[float] = None,
+                              horizon_days: int = 30) -> None:
+    if not db.is_enabled():
+        return
+    existing = next((h for h in _load_wallet_holdings() if h.get("symbol", "").upper() == asset["symbol"].upper()), {})
+    holding = {
+        **existing,
+        "symbol": asset["symbol"],
+        "name": asset.get("name", asset["symbol"]),
+        "full_name": asset.get("full_name", asset.get("name", asset["symbol"])),
+        "isin": asset.get("isin", ""),
+        "market": asset.get("market", "US"),
+        "country": asset.get("country", asset.get("market", "US")),
+        "asset_type": asset.get("asset_type", "stock"),
+        "currency": asset.get("currency", "USD"),
+        "exchange": asset.get("exchange", ""),
+        "quantity": quantity if quantity is not None else existing.get("quantity", 0),
+        "avg_price": avg_price if avg_price is not None else existing.get("avg_price", 0),
+        "target_price": target_price if target_price is not None else existing.get("target_price"),
+        "stop_loss": stop_loss if stop_loss is not None else existing.get("stop_loss"),
+        "horizon_days": horizon_days or existing.get("horizon_days", 30),
+        "alert_enabled": existing.get("alert_enabled", True),
+        "enabled": True,
+        "note": existing.get("note", ""),
+    }
+    db.save_wallet_holding(_normalize_wallet_holding(holding))
+
+
 def _recommendation_from_signal(signal: dict, holding: dict, current_price: Optional[float]) -> dict:
     action = (signal or {}).get("action", "HOLD")
     confidence = int((signal or {}).get("confidence") or 0)
     quantity = float(holding.get("quantity") or 0)
     avg_price = float(holding.get("avg_price") or 0)
+    if quantity <= 0 or avg_price <= 0:
+        return {
+            "signal_action": action,
+            "recommendation": "SETUP_REQUIRED",
+            "confidence": confidence,
+            "holding_days_estimate": int(holding.get("horizon_days") or 30),
+            "alert_type": None,
+            "is_relevant": False,
+            "rationale": [
+                "L'asset e' gia' collegato al wallet ma mancano quantita' e/o prezzo medio di carico.",
+                "Completa i dati della posizione per ottenere stima puntuale, P/L e alert operativi.",
+            ],
+            "pnl_pct": 0.0,
+        }
     pnl_pct = 0.0
     if current_price and avg_price:
         pnl_pct = round(((current_price - avg_price) / avg_price) * 100, 2)
@@ -322,6 +367,151 @@ def run_wallet_review(force_email: bool = False) -> dict:
     finally:
         state["wallet_running"] = False
 
+
+def _income_weighted_yield(role: str, asset_type: str, recommendation: str) -> float:
+    if asset_type == "etf":
+        base = {"income": 0.034, "growth": 0.011, "opportunistico": 0.006}.get(role, 0.02)
+    else:
+        base = {"income": 0.041, "growth": 0.008, "opportunistico": 0.004}.get(role, 0.015)
+    if recommendation in ("SELL", "REDUCE", "RISK_EXIT"):
+        base *= 0.4
+    return round(base, 4)
+
+
+def _market_income_profile() -> dict:
+    macro = (state.get("macro_context") or {})
+    regime = macro.get("regime", "NEUTRAL")
+    rotation = (state.get("sector_rotation") or {}).get("rotation_regime", "MIXED")
+    if regime == "BULLISH" and rotation == "RISK_ON":
+        return {"scenario": "Mercato rialzista con leadership ciclica", "risk": "Medio", "income": 0.40, "growth": 0.40, "opportunistic": 0.20}
+    if regime == "BEARISH" or rotation == "RISK_OFF":
+        return {"scenario": "Mercato difensivo o ribassista", "risk": "Medio-Alto", "income": 0.65, "growth": 0.20, "opportunistic": 0.15}
+    if regime == "CAUTIOUS":
+        return {"scenario": "Mercato incerto con volatilita' elevata", "risk": "Medio", "income": 0.55, "growth": 0.25, "opportunistic": 0.20}
+    return {"scenario": "Mercato bilanciato senza trend dominante", "risk": "Medio", "income": 0.50, "growth": 0.30, "opportunistic": 0.20}
+
+
+def run_income_plan() -> dict:
+    signals = state.get("signals", []) or []
+    wallet = state.get("wallet") or run_wallet_review()
+    profile = _market_income_profile()
+    holdings = wallet.get("holdings", []) or []
+    invested_capital = float(wallet.get("summary", {}).get("market_value_total", 0) or 0)
+    capital_tier = "Capitale basso" if invested_capital < 25000 else "Capitale medio" if invested_capital < 100000 else "Capitale alto"
+
+    sorted_signals = sorted(signals, key=lambda s: (s.get("action") == "BUY", s.get("confidence", 0), s.get("score", 0)), reverse=True)
+    etfs = [s for s in sorted_signals if s.get("asset_type") == "etf"]
+    stocks = [s for s in sorted_signals if s.get("asset_type") == "stock"]
+
+    instruments = []
+    seen = set()
+
+    def pick(items, role: str, limit: int, max_weight: float):
+        for sig in items:
+            sym = sig.get("symbol")
+            if not sym or sym in seen:
+                continue
+            recommendation = "comprare" if sig.get("action") == "BUY" else "mantenere" if sig.get("action") in ("WATCHLIST", "HOLD") else "ridurre"
+            item = {
+                "symbol": sym,
+                "name": sig.get("name") or sig.get("full_name") or sym,
+                "asset_type": sig.get("asset_type", "stock"),
+                "role": role,
+                "recommendation": recommendation,
+                "max_weight": max_weight,
+                "confidence": int(sig.get("confidence") or 0),
+                "reason": "; ".join((sig.get("reasons") or [])[:2]) or "Selezione coerente con il regime di mercato attuale.",
+                "estimated_annual_yield": _income_weighted_yield(role, sig.get("asset_type", "stock"), recommendation.upper()),
+            }
+            instruments.append(item)
+            seen.add(sym)
+            if sum(1 for x in instruments if x["role"] == role) >= limit:
+                break
+
+    pick(etfs, "income", 3, 0.20)
+    pick(stocks, "income", 2, 0.10)
+    pick(etfs, "growth", 2, 0.15)
+    pick(stocks, "growth", 3, 0.10)
+    pick(stocks, "opportunistico", 2, 0.08)
+
+    if not instruments:
+        instruments = [{
+            "symbol": "N/D",
+            "name": "Nessuno strumento disponibile",
+            "asset_type": "mixed",
+            "role": "income",
+            "recommendation": "mantenere",
+            "max_weight": 0.0,
+            "confidence": 0,
+            "reason": "Servono piu' ETF e azioni analizzati nella watchlist per costruire il piano rendita.",
+            "estimated_annual_yield": 0.0,
+        }]
+
+    annual_yield = 0.0
+    weights = {"income": profile["income"], "growth": profile["growth"], "opportunistico": profile["opportunistic"]}
+    grouped = {"income": [], "growth": [], "opportunistico": []}
+    for item in instruments:
+        grouped[item["role"]].append(item)
+    for role, items in grouped.items():
+        if not items:
+            continue
+        role_yield = sum(x["estimated_annual_yield"] for x in items) / len(items)
+        annual_yield += role_yield * weights[role]
+
+    annual_yield = round(max(annual_yield * 0.9, 0.01), 4)
+    estimated_monthly_income = round((invested_capital * annual_yield) / 12, 2)
+    target_capital = round(12000 / annual_yield, 2) if annual_yield > 0 else 0.0
+    gap_to_target = round(max(target_capital - invested_capital, 0), 2)
+
+    etf_value = sum(float(h.get("market_value") or 0) for h in holdings if h.get("asset_type") == "etf")
+    stock_value = sum(float(h.get("market_value") or 0) for h in holdings if h.get("asset_type") == "stock")
+    total_value = etf_value + stock_value
+    current_mix = {
+        "etf_pct": round((etf_value / total_value) * 100, 1) if total_value else round(profile["income"] * 100, 1),
+        "stock_pct": round((stock_value / total_value) * 100, 1) if total_value else round((1 - profile["income"]) * 100, 1),
+    }
+
+    actions = []
+    for item in instruments[:8]:
+        actions.append({
+            "symbol": item["symbol"],
+            "action": item["recommendation"],
+            "role": item["role"],
+            "note": item["reason"],
+        })
+
+    plan = {
+        "market_scenario": profile["scenario"],
+        "risk_level": profile["risk"],
+        "capital_profile": capital_tier,
+        "allocation": {
+            "etf_vs_stocks": current_mix,
+            "income_pct": round(profile["income"] * 100, 1),
+            "growth_pct": round(profile["growth"] * 100, 1),
+            "opportunistic_pct": round(profile["opportunistic"] * 100, 1),
+        },
+        "summary": {
+            "estimated_monthly_income": estimated_monthly_income,
+            "portfolio_avg_yield_pct": round(annual_yield * 100, 2),
+            "target_capital_for_goal": target_capital,
+            "gap_to_target": gap_to_target,
+            "current_capital": round(invested_capital, 2),
+        },
+        "instruments": instruments,
+        "actions": actions,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "next_run": (datetime.utcnow() + timedelta(minutes=INCOME_SCHEDULER_MINUTES)).isoformat() + "Z",
+    }
+    state["income_plan"] = plan
+    state["income_last_run"] = plan["updated_at"]
+    state["income_next_run"] = plan["next_run"]
+    if db.is_enabled():
+        try:
+            db.save_income_plan(plan)
+        except Exception as e:
+            log.error(f"[DB] save_income_plan: {e}")
+    return plan
+
 # Modello Pydantic per asset
 class AssetModel(BaseModel):
     symbol:     str
@@ -335,6 +525,12 @@ class AssetModel(BaseModel):
     exchange:   str = ""
     enabled:    bool = True
     note:       str = ""
+    add_to_wallet: bool = False
+    wallet_quantity: Optional[float] = None
+    wallet_avg_price: Optional[float] = None
+    wallet_target_price: Optional[float] = None
+    wallet_stop_loss: Optional[float] = None
+    wallet_horizon_days: int = 30
 
 
 class WalletHoldingModel(BaseModel):
@@ -372,6 +568,9 @@ state = {
     "wallet_last_run": None,
     "wallet_next_run": None,
     "wallet_running": False,
+    "income_plan": None,
+    "income_last_run": None,
+    "income_next_run": None,
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -603,6 +802,7 @@ def _scheduler_loop():
     log.info(f"[SCHEDULER] thread avviato | intervallo={SCHEDULER_MINUTES}min | finestra=08:00-23:30")
     last_run_at = None  # timestamp ultimo run completato
     last_wallet_run_at = None
+    last_income_run_at = None
 
     # Prima scansione solo se siamo dentro la finestra
     if is_trading_hours():
@@ -612,6 +812,8 @@ def _scheduler_loop():
         if _load_wallet_holdings():
             run_wallet_review()
             last_wallet_run_at = datetime.utcnow()
+        run_income_plan()
+        last_income_run_at = datetime.utcnow()
     else:
         log.info("[SCHEDULER] Fuori finestra operativa - prima scansione posticipata alle 08:00")
 
@@ -637,6 +839,10 @@ def _scheduler_loop():
             log.info(f"[WALLET] Avvio controllo portafoglio (ultima: {last_wallet_run_at.strftime('%H:%M') if last_wallet_run_at else 'mai'})")
             run_wallet_review()
             last_wallet_run_at = datetime.utcnow()
+        if last_income_run_at is None or (now - last_income_run_at).total_seconds() >= INCOME_SCHEDULER_MINUTES * 60:
+            log.info(f"[INCOME] Avvio piano rendita (ultima: {last_income_run_at.strftime('%H:%M') if last_income_run_at else 'mai'})")
+            run_income_plan()
+            last_income_run_at = datetime.utcnow()
 
 
 # â"€â"€ FastAPI â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -675,6 +881,7 @@ async def health():
 async def config():
     return {"scheduler_minutes":SCHEDULER_MINUTES,"scheduler_enabled":SCHEDULER_ENABLED,
             "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES,
+            "income_scheduler_minutes": INCOME_SCHEDULER_MINUTES,
             "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
             "has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
@@ -702,6 +909,14 @@ async def add_asset(asset: AssetModel):
     if any(a["symbol"].upper() == sym for a in all_assets):
         raise HTTPException(400, f"Simbolo {sym} già presente in watchlist")
     new_asset = {**asset.model_dump(), "symbol": sym}
+    wallet_opts = {
+        "add_to_wallet": new_asset.pop("add_to_wallet", False),
+        "wallet_quantity": new_asset.pop("wallet_quantity", None),
+        "wallet_avg_price": new_asset.pop("wallet_avg_price", None),
+        "wallet_target_price": new_asset.pop("wallet_target_price", None),
+        "wallet_stop_loss": new_asset.pop("wallet_stop_loss", None),
+        "wallet_horizon_days": new_asset.pop("wallet_horizon_days", 30),
+    }
     if not new_asset.get("full_name"):
         new_asset["full_name"] = new_asset["name"]
     if db.is_enabled():
@@ -711,6 +926,15 @@ async def add_asset(asset: AssetModel):
         _save_assets(all_assets)
     all_assets = _load_all_assets()
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
+    if wallet_opts["add_to_wallet"] and db.is_enabled():
+        _upsert_wallet_from_asset(
+            new_asset,
+            quantity=wallet_opts["wallet_quantity"],
+            avg_price=wallet_opts["wallet_avg_price"],
+            target_price=wallet_opts["wallet_target_price"],
+            stop_loss=wallet_opts["wallet_stop_loss"],
+            horizon_days=wallet_opts["wallet_horizon_days"],
+        )
     log.info(f"[ASSETS] Aggiunto: {sym} ({new_asset['name']})")
     return {"status": "added", "asset": new_asset, "total": len(all_assets)}
 
@@ -724,6 +948,14 @@ async def update_asset(symbol: str, asset: AssetModel):
     if idx is None:
         raise HTTPException(404, f"Simbolo {sym} non trovato")
     updated = {**asset.model_dump(), "symbol": sym}
+    wallet_opts = {
+        "add_to_wallet": updated.pop("add_to_wallet", False),
+        "wallet_quantity": updated.pop("wallet_quantity", None),
+        "wallet_avg_price": updated.pop("wallet_avg_price", None),
+        "wallet_target_price": updated.pop("wallet_target_price", None),
+        "wallet_stop_loss": updated.pop("wallet_stop_loss", None),
+        "wallet_horizon_days": updated.pop("wallet_horizon_days", 30),
+    }
     if not updated.get("full_name"):
         updated["full_name"] = updated["name"]
     if db.is_enabled():
@@ -733,6 +965,15 @@ async def update_asset(symbol: str, asset: AssetModel):
         _save_assets(all_assets)
     all_assets = _load_all_assets()
     ASSETS = [a for a in all_assets if a.get("enabled", True)]
+    if wallet_opts["add_to_wallet"] and db.is_enabled():
+        _upsert_wallet_from_asset(
+            updated,
+            quantity=wallet_opts["wallet_quantity"],
+            avg_price=wallet_opts["wallet_avg_price"],
+            target_price=wallet_opts["wallet_target_price"],
+            stop_loss=wallet_opts["wallet_stop_loss"],
+            horizon_days=wallet_opts["wallet_horizon_days"],
+        )
     log.info(f"[ASSETS] Modificato: {sym}")
     return {"status": "updated", "asset": updated}
 
@@ -808,10 +1049,10 @@ async def add_wallet_holding(holding: WalletHoldingModel):
     if not db.is_enabled():
         raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
     normalized = _normalize_wallet_holding(holding.model_dump())
-    if normalized["quantity"] <= 0:
-        raise HTTPException(400, "quantity deve essere > 0")
-    if normalized["avg_price"] <= 0:
-        raise HTTPException(400, "avg_price deve essere > 0")
+    if normalized["quantity"] < 0:
+        raise HTTPException(400, "quantity non puo' essere < 0")
+    if normalized["avg_price"] < 0:
+        raise HTTPException(400, "avg_price non puo' essere < 0")
     db.save_wallet_holding(normalized)
     wallet = run_wallet_review()
     return {"status": "added", "holding": normalized, "wallet": wallet}
@@ -822,10 +1063,10 @@ async def update_wallet_holding(symbol: str, holding: WalletHoldingModel):
     if not db.is_enabled():
         raise HTTPException(503, "MariaDB non configurato: il wallet richiede DB attivo")
     normalized = _normalize_wallet_holding({**holding.model_dump(), "symbol": symbol.upper()})
-    if normalized["quantity"] <= 0:
-        raise HTTPException(400, "quantity deve essere > 0")
-    if normalized["avg_price"] <= 0:
-        raise HTTPException(400, "avg_price deve essere > 0")
+    if normalized["quantity"] < 0:
+        raise HTTPException(400, "quantity non puo' essere < 0")
+    if normalized["avg_price"] < 0:
+        raise HTTPException(400, "avg_price non puo' essere < 0")
     db.save_wallet_holding(normalized)
     wallet = run_wallet_review()
     return {"status": "updated", "holding": normalized, "wallet": wallet}
@@ -845,6 +1086,27 @@ async def remove_wallet_holding(symbol: str):
 async def refresh_wallet(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_wallet_review, True)
     return {"status": "started"}
+
+
+@app.get("/api/income-plan")
+async def get_income_plan():
+    plan = state.get("income_plan")
+    if not plan:
+        plan = run_income_plan()
+    return plan
+
+
+@app.post("/api/income-plan/refresh")
+async def refresh_income_plan(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_income_plan)
+    return {"status": "started"}
+
+
+@app.get("/api/income-plan/history")
+async def get_income_plan_history(days: int = 7):
+    if not db.is_enabled():
+        raise HTTPException(503, "MariaDB non configurato")
+    return {"days": days, "runs": db.get_income_history(days)}
 
 
 @app.get("/api/wallet/history")

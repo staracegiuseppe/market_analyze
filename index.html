@@ -150,6 +150,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 <div class="tabs">
   <div class="tab active" onclick="showTab('signals')">⊕ Segnali</div>
   <div class="tab" onclick="showTab('wallet')">💼 Wallet</div>
+  <div class="tab" onclick="showTab('income')">💶 Rendita</div>
   <div class="tab" onclick="showTab('assets')">◈ Asset</div>
   <div class="tab" onclick="showTab('backtest')">⊞ Backtest</div>
   <div class="tab" onclick="showTab('log')">▶ Log</div>
@@ -328,6 +329,38 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
       <button class="btn" onclick="closeAssetForm()">✕ Annulla</button>
       <span id="af-msg" style="font-size:11px;display:none"></span>
     </div>
+
+    <div style="margin-top:14px;padding:12px 14px;background:#0D1420;border:1px solid #253050;border-radius:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#D0DFF8;cursor:pointer">
+        <input id="af-add-wallet" type="checkbox" onchange="toggleAssetWalletFields()"/>
+        Aggiungi anche al wallet
+      </label>
+      <div id="af-wallet-fields" style="display:none;margin-top:10px">
+        <div style="font-size:10px;color:#6B7280;margin-bottom:8px">Puoi collegarlo subito al wallet e completare quantità/prezzo ora o più tardi.</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+          <div>
+            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">QUANTITÀ</div>
+            <input id="af-wallet-qty" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">PREZZO MEDIO</div>
+            <input id="af-wallet-avg" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">TARGET</div>
+            <input id="af-wallet-target" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">STOP LOSS</div>
+            <input id="af-wallet-stop" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+          </div>
+        </div>
+        <div style="margin-top:10px;max-width:220px">
+          <div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ORIZZONTE (GIORNI)</div>
+          <input id="af-wallet-horizon" type="number" min="1" step="1" value="30" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:7px 10px;font-size:12px;outline:none"/>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Tabella assets -->
@@ -464,6 +497,45 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   </div>
 </div>
 
+<!-- ═══════════════════ TAB: INCOME ═══════════════════ -->
+<div class="tc" id="tab-income">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div style="font-size:16px;font-weight:700;color:#F9FAFB">💶 Piano Rendita Mensile</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:3px">Strategia ibrida ETF + azioni con obiettivo prudente di 1000€/mese</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="spin" id="income-spin"></div>
+      <button class="btn" onclick="refreshIncomePlan()">↻ Aggiorna piano</button>
+    </div>
+  </div>
+  <div class="cfg-banner">
+    <span id="income-meta">In attesa del primo piano rendita...</span>
+    <span id="income-sched" style="margin-left:auto;color:#6880A0"></span>
+  </div>
+  <div id="income-summary" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px"></div>
+  <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:12px">
+    <div class="panel">
+      <div class="ph">📦 Strumenti Consigliati</div>
+      <div class="pb" id="income-instruments">Caricamento...</div>
+    </div>
+    <div>
+      <div class="panel" style="margin-bottom:12px">
+        <div class="ph">🧭 Asset Allocation</div>
+        <div class="pb" id="income-allocation">Caricamento...</div>
+      </div>
+      <div class="panel" style="margin-bottom:12px">
+        <div class="ph">⚙ Azioni Operative</div>
+        <div class="pb" id="income-actions">Caricamento...</div>
+      </div>
+      <div class="panel">
+        <div class="ph">🕒 Storico Piano</div>
+        <div class="pb" id="income-history">Caricamento...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════ TAB: WALLET ═══════════════════ -->
 <div class="tc" id="tab-wallet">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -581,17 +653,19 @@ let cfg = {};
 let walletData = null;
 let walletHoldings = [];
 let walletEditSymbol = null;
+let incomePlan = null;
 
 // ════════════════════════════════════════════════════════════
 //  TABS
 // ════════════════════════════════════════════════════════════
-const TAB_IDS = ['signals','wallet','assets','backtest','log','settings','smartmoney'];
+const TAB_IDS = ['signals','wallet','income','assets','backtest','log','settings','smartmoney'];
 function showTab(id){
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active', TAB_IDS[i]===id));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el = document.getElementById('tab-'+id);
   if(el) el.classList.add('active');
   if(id==='wallet')     loadWallet();
+  if(id==='income')     loadIncomePlan();
   if(id==='assets')     loadAssets();
   if(id==='settings')   loadSettings();
   if(id==='smartmoney') loadSM();
@@ -1356,6 +1430,103 @@ async function refreshWallet(){
 }
 
 // ════════════════════════════════════════════════════════════
+//  INCOME PLAN
+// ════════════════════════════════════════════════════════════
+function renderIncomeSummary(plan){
+  const summary = plan.summary || {};
+  const box = document.getElementById('income-summary');
+  const cards = [
+    ['Rendita stimata', (summary.estimated_monthly_income||0).toFixed(2)+' €/mese', '#16A34A'],
+    ['Yield medio', (summary.portfolio_avg_yield_pct||0).toFixed(2)+'%', '#60A5FA'],
+    ['Capitale target', (summary.target_capital_for_goal||0).toFixed(0)+' €', '#C8A020'],
+    ['Gap residuo', (summary.gap_to_target||0).toFixed(0)+' €', '#F59E0B'],
+  ];
+  box.innerHTML = cards.map(([l,v,c]) =>
+    '<div class="panel"><div class="pb"><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">'+l.toUpperCase()+'</div><div style="font-size:22px;font-weight:800;color:'+c+'">'+v+'</div></div></div>'
+  ).join('');
+}
+
+function renderIncomeAllocation(plan){
+  const a = plan.allocation || {};
+  const mix = a.etf_vs_stocks || {};
+  document.getElementById('income-allocation').innerHTML =
+    '<div style="font-size:11px;color:#D1D5DB;line-height:1.8">'
+    + 'ETF vs azioni attuale: <b style="color:#D0DFF8">ETF '+(mix.etf_pct||0)+'% · Azioni '+(mix.stock_pct||0)+'%</b><br>'
+    + 'Blocco Income: <b style="color:#16A34A">'+(a.income_pct||0)+'%</b><br>'
+    + 'Blocco Growth: <b style="color:#60A5FA">'+(a.growth_pct||0)+'%</b><br>'
+    + 'Blocco Opportunistico: <b style="color:#F59E0B">'+(a.opportunistic_pct||0)+'%</b><br>'
+    + 'Profilo capitale: <b style="color:#D0DFF8">'+escH(plan.capital_profile||'—')+'</b><br>'
+    + 'Rischio complessivo: <b style="color:#D0DFF8">'+escH(plan.risk_level||'—')+'</b>'
+    + '</div>';
+}
+
+function renderIncomeInstruments(plan){
+  const instruments = plan.instruments || [];
+  if(!instruments.length){
+    document.getElementById('income-instruments').innerHTML = '<div style="color:#6B7280">Nessun strumento disponibile.</div>';
+    return;
+  }
+  document.getElementById('income-instruments').innerHTML = instruments.map(item => {
+    const recCol = item.recommendation === 'comprare' ? '#16A34A' : item.recommendation === 'ridurre' ? '#DC2626' : '#F59E0B';
+    return '<div style="padding:12px 0;border-bottom:1px solid #19203022">'
+      + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'
+      + '<div><div style="font-size:15px;font-weight:800;color:#F9FAFB">'+escH(item.symbol)+' <span style="font-size:11px;color:#6B7280">'+escH(item.name||'')+'</span></div>'
+      + '<div style="font-size:10px;color:#6B7280;margin-top:2px">Ruolo: '+escH(item.role)+' · Peso max: '+Math.round((item.max_weight||0)*100)+'% · Yield stimato: '+((item.estimated_annual_yield||0)*100).toFixed(2)+'%</div></div>'
+      + '<div style="text-align:right"><div style="font-size:11px;font-weight:800;color:'+recCol+'">'+escH(item.recommendation)+'</div><div style="font-size:10px;color:#6B7280">Conf. '+(item.confidence||0)+'%</div></div></div>'
+      + '<div style="font-size:11px;color:#D1D5DB;line-height:1.7;margin-top:7px">'+escH(item.reason||'')+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+function renderIncomeActions(plan){
+  const actions = plan.actions || [];
+  document.getElementById('income-actions').innerHTML = actions.length
+    ? actions.map(a => '<div style="padding:7px 0;border-bottom:1px solid #19203022;font-size:11px"><b style="color:#D0DFF8">'+escH(a.symbol)+'</b> · <span style="color:'+(a.action==='comprare'?'#16A34A':a.action==='ridurre'?'#DC2626':'#F59E0B')+'">'+escH(a.action)+'</span><div style="color:#6B7280;margin-top:2px">'+escH(a.note||'')+'</div></div>').join('')
+    : '<div style="color:#6B7280">Nessuna azione operativa disponibile.</div>';
+}
+
+function renderIncomeHistory(runs){
+  document.getElementById('income-history').innerHTML = runs && runs.length
+    ? runs.slice(0,6).map(r => '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #19203022;font-size:11px"><span style="color:#9CA3AF">'+fmtTime(r.run_at)+'</span><span style="color:#D0DFF8">'+Number(r.monthly_income_est||0).toFixed(2)+'€/m</span><span style="color:#6B7280">'+escH(r.scenario||'—')+'</span></div>').join('')
+    : '<div style="color:#6B7280">Nessuno storico disponibile.</div>';
+}
+
+async function loadIncomePlan(){
+  try{
+    const [planRes, histRes] = await Promise.all([
+      fetch(api('/api/income-plan')),
+      fetch(api('/api/income-plan/history?days=3')),
+    ]);
+    const plan = await planRes.json();
+    const history = histRes.ok ? await histRes.json() : {runs:[]};
+    incomePlan = plan;
+    document.getElementById('income-meta').innerHTML =
+      'Scenario: <b style="color:#D0DFF8">'+escH(plan.market_scenario||'—')+'</b> · Aggiornato: <b style="color:#D0DFF8">'+(plan.updated_at?fmtTime(plan.updated_at):'—')+'</b>';
+    document.getElementById('income-sched').textContent = 'Auto-update ogni '+(cfg.income_scheduler_minutes||30)+' min';
+    renderIncomeSummary(plan);
+    renderIncomeAllocation(plan);
+    renderIncomeInstruments(plan);
+    renderIncomeActions(plan);
+    renderIncomeHistory(history.runs || []);
+  }catch(e){
+    document.getElementById('income-meta').textContent = 'Errore piano rendita: '+e.message;
+  }
+}
+
+async function refreshIncomePlan(){
+  const sp = document.getElementById('income-spin');
+  sp.classList.add('on');
+  try{
+    await fetch(api('/api/income-plan/refresh'), {method:'POST'});
+    await new Promise(r=>setTimeout(r,2500));
+    await loadIncomePlan();
+  }catch(e){
+    document.getElementById('income-meta').textContent = 'Errore refresh piano rendita: '+e.message;
+  }
+  sp.classList.remove('on');
+}
+
+// ════════════════════════════════════════════════════════════
 //  ASSETS — CRUD
 // ════════════════════════════════════════════════════════════
 let _allAssets   = [];   // tutti gli asset (inclusi disabled)
@@ -1475,6 +1646,7 @@ function openAddForm(){
 function openEditForm(sym){
   const a = _allAssets.find(x=>x.symbol===sym);
   if(!a) return;
+  const wh = walletHoldings.find(x=>x.symbol===sym);
   _editSymbol = sym;
   document.getElementById('asset-form-title').textContent = 'Modifica asset: ' + sym;
   document.getElementById('af-isin-lookup-row').style.display = 'none';
@@ -1487,6 +1659,13 @@ function openEditForm(sym){
   document.getElementById('af-type').value      = a.asset_type || 'stock';
   document.getElementById('af-currency').value  = a.currency || 'USD';
   document.getElementById('af-exchange').value  = a.exchange || '';
+  document.getElementById('af-add-wallet').checked = !!wh;
+  document.getElementById('af-wallet-fields').style.display = wh ? 'block' : 'none';
+  document.getElementById('af-wallet-qty').value = wh && wh.quantity ? wh.quantity : '';
+  document.getElementById('af-wallet-avg').value = wh && wh.avg_price ? wh.avg_price : '';
+  document.getElementById('af-wallet-target').value = wh && wh.target_price ? wh.target_price : '';
+  document.getElementById('af-wallet-stop').value = wh && wh.stop_loss ? wh.stop_loss : '';
+  document.getElementById('af-wallet-horizon').value = wh && wh.horizon_days ? wh.horizon_days : 30;
   document.getElementById('af-msg').style.display = 'none';
   document.getElementById('asset-form-box').style.display = 'block';
   document.getElementById('af-name').focus();
@@ -1506,11 +1685,22 @@ function _clearForm(){
   document.getElementById('af-type').value     = 'stock';
   document.getElementById('af-currency').value = 'USD';
   document.getElementById('af-msg').style.display = 'none';
+  document.getElementById('af-add-wallet').checked = false;
+  document.getElementById('af-wallet-fields').style.display = 'none';
+  ['af-wallet-qty','af-wallet-avg','af-wallet-target','af-wallet-stop'].forEach(id=>{
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('af-wallet-horizon').value = '30';
   document.getElementById('af-lookup-result').style.display = 'none';
   document.getElementById('af-lookup-result-inner').textContent = '';
   document.getElementById('af-lookup-spin').style.display = 'none';
   const btn = document.getElementById('af-lookup-btn');
   if(btn) { btn.disabled = false; btn.textContent = '🔍 Cerca'; }
+}
+
+function toggleAssetWalletFields(){
+  document.getElementById('af-wallet-fields').style.display =
+    document.getElementById('af-add-wallet').checked ? 'block' : 'none';
 }
 
 function _showFormMsg(msg, ok){
@@ -1538,6 +1728,12 @@ async function saveAsset(){
     exchange:   document.getElementById('af-exchange').value.trim().toUpperCase(),
     enabled:    true,
     note:       '',
+    add_to_wallet: document.getElementById('af-add-wallet').checked,
+    wallet_quantity: document.getElementById('af-wallet-qty').value ? Number(document.getElementById('af-wallet-qty').value) : null,
+    wallet_avg_price: document.getElementById('af-wallet-avg').value ? Number(document.getElementById('af-wallet-avg').value) : null,
+    wallet_target_price: document.getElementById('af-wallet-target').value ? Number(document.getElementById('af-wallet-target').value) : null,
+    wallet_stop_loss: document.getElementById('af-wallet-stop').value ? Number(document.getElementById('af-wallet-stop').value) : null,
+    wallet_horizon_days: Number(document.getElementById('af-wallet-horizon').value || 30),
   };
 
   try{
@@ -1685,6 +1881,7 @@ async function loadSettings(){
       '<div style="font-size:11px;line-height:2.4;color:#6880A0">'
       + 'Intervallo: <b style="color:#C8A020">ogni '+cfg.scheduler_minutes+' minuti</b><br>'
       + 'Wallet: <b style="color:#C8A020">ogni '+(cfg.wallet_scheduler_minutes||15)+' minuti</b><br>'
+      + 'Rendita: <b style="color:#C8A020">ogni '+(cfg.income_scheduler_minutes||30)+' minuti</b><br>'
       + 'Attivo: <span style="color:'+(cfg.scheduler_enabled?'#16A34A':'#DC2626')+'">'+(cfg.scheduler_enabled?'✓ attivo':'✗ disabilitato')+'</span><br>'
       + 'Finestra: <b style="color:'+wc+'">08:00 – 23:30 ('+wl+')</b>'
       + '</div>';
@@ -2010,9 +2207,13 @@ async function init(){
   }
   // Carica rotazione settoriale in background
   loadSectorRotation().catch(function(e){ console.warn('sector rotation:', e); });
+  loadWallet().catch(function(e){ console.warn('wallet:', e); });
+  loadIncomePlan().catch(function(e){ console.warn('income plan:', e); });
   const count = allSignals.length;
   document.getElementById('hdr-count').textContent = count+' asset';
   setInterval(loadSignals, 300000);
+  setInterval(loadWallet, 300000);
+  setInterval(loadIncomePlan, 1800000);
 }
 
 window.addEventListener('DOMContentLoaded', init);
@@ -2026,6 +2227,8 @@ window.runBacktest   = runBacktest;
 window.testEmail     = testEmail;
 window.loadAssets    = loadAssets;
 window.loadWallet    = loadWallet;
+window.loadIncomePlan = loadIncomePlan;
+window.refreshIncomePlan = refreshIncomePlan;
 window.saveWalletHolding = saveWalletHolding;
 window.resetWalletForm = resetWalletForm;
 window.editWalletHolding = editWalletHolding;
@@ -2035,6 +2238,7 @@ window.loadSectorRotation = loadSectorRotation;
 window.openAddForm   = openAddForm;
 window.openEditForm  = openEditForm;
 window.closeAssetForm= closeAssetForm;
+window.toggleAssetWalletFields = toggleAssetWalletFields;
 window.saveAsset     = saveAsset;
 window.toggleAsset   = toggleAsset;
 window.openDelDialog = openDelDialog;
