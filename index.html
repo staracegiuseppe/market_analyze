@@ -591,7 +591,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
     <div class="pb" style="padding:0">
       <div style="overflow:auto">
         <table class="trade-table" style="width:100%">
-          <thead><tr><th>Simbolo</th><th>Qty</th><th>Prezzo medio</th><th>Ultimo</th><th>P/L</th><th>Azione</th><th>Orizzonte</th><th></th></tr></thead>
+          <thead><tr><th>Titolo</th><th>Qty</th><th>Prezzo medio</th><th>Ultimo</th><th>P/L</th><th>Azione</th><th>Orizzonte</th><th></th></tr></thead>
           <tbody id="wallet-holdings-body">
             <tr><td colspan="8" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione inserita</td></tr>
           </tbody>
@@ -607,7 +607,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
     <div class="pb" style="padding:0">
       <div style="overflow:auto">
         <table class="trade-table" style="width:100%">
-          <thead><tr><th>Simbolo</th><th>Qty</th><th>PMC</th><th>Prezzo uscita</th><th>Chiusa il</th><th>Nota</th><th></th></tr></thead>
+          <thead><tr><th>Titolo</th><th>Qty</th><th>PMC</th><th>Prezzo uscita</th><th>Chiusa il</th><th>Nota</th><th></th></tr></thead>
           <tbody id="wallet-closed-body">
             <tr><td colspan="7" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione chiusa</td></tr>
           </tbody>
@@ -1316,8 +1316,10 @@ function renderWalletHoldings(holdings){
   }
   tbody.innerHTML = holdings.map(h => {
     const col = walletRecColor(h.recommendation || 'HOLD');
+    const title = h.full_name || h.name || h.symbol;
+    const subtitle = [h.symbol, h.isin ? 'ISIN: '+h.isin : ''].filter(Boolean).join(' · ');
     return '<tr>'
-      + '<td>'+escH(h.symbol)+'</td>'
+      + '<td><div style="color:#F9FAFB;font-weight:700">'+escH(title)+'</div><div style="font-size:10px;color:#6B7280;margin-top:2px">'+escH(subtitle)+'</div></td>'
       + '<td>'+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</td>'
       + '<td>'+eur(h.avg_price||0)+'</td>'
       + '<td>'+(h.current_price!=null?eur(h.current_price):'—')+'</td>'
@@ -1335,9 +1337,12 @@ function renderClosedWalletHoldings(holdings){
     tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#6B7280">Nessuna posizione chiusa</td></tr>';
     return;
   }
-  tbody.innerHTML = holdings.map(h =>
+  tbody.innerHTML = holdings.map(h => {
+    const title = h.full_name || h.name || h.symbol;
+    const subtitle = [h.symbol, h.isin ? 'ISIN: '+h.isin : ''].filter(Boolean).join(' · ');
+    return (
     '<tr>'
-    + '<td>'+escH(h.symbol)+'</td>'
+    + '<td><div style="color:#F9FAFB;font-weight:700">'+escH(title)+'</div><div style="font-size:10px;color:#6B7280;margin-top:2px">'+escH(subtitle)+'</div></td>'
     + '<td>'+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</td>'
     + '<td>'+eur(h.avg_price||0)+'</td>'
     + '<td>'+(h.exit_price!=null?eur(h.exit_price):'—')+'</td>'
@@ -1345,7 +1350,8 @@ function renderClosedWalletHoldings(holdings){
     + '<td style="color:#9CA3AF">'+escH(h.exit_note||h.note||'')+'</td>'
     + '<td><button class="btn" style="padding:4px 8px;font-size:10px;margin-right:4px" onclick="reopenWalletHolding(\''+h.symbol+'\')">Riapri</button><button class="btn" style="padding:4px 8px;font-size:10px;border-color:#DC262644;color:#DC2626" onclick="deleteWalletHolding(\''+h.symbol+'\')">Elimina</button></td>'
     + '</tr>'
-  ).join('');
+    );
+  }).join('');
 }
 
 function renderWalletCards(holdings){
@@ -1357,9 +1363,12 @@ function renderWalletCards(holdings){
   box.innerHTML = holdings.map(h => {
     const col = walletRecColor(h.recommendation || 'HOLD');
     const reasons = (h.reasons||[]).slice(0,4).map(r => '<li style="margin-bottom:4px">'+escH(r)+'</li>').join('');
+    const title = h.full_name || h.name || h.symbol;
+    const subtitle = [h.symbol, h.isin ? 'ISIN: '+h.isin : ''].filter(Boolean).join(' · ');
     return '<div class="sig-card" style="margin-bottom:12px">'
       + '<div class="sig-card-hdr" style="border-left:4px solid '+col+'">'
-      + '<div><div style="font-size:18px;font-weight:800;color:#F9FAFB">'+escH(h.symbol)+' <span style="font-size:12px;color:#6B7280">'+escH(h.name||'')+'</span></div>'
+      + '<div><div style="font-size:18px;font-weight:800;color:#F9FAFB">'+escH(title)+'</div>'
+      + '<div style="font-size:11px;color:#6B7280;margin-top:2px">'+escH(subtitle)+'</div>'
       + '<div style="font-size:11px;color:#9CA3AF;margin-top:3px">Valore attuale: <b>'+(h.market_value!=null?eur(h.market_value):'—')+'</b> · Quantità: '+Number(h.quantity||0).toFixed(4).replace(/\.?0+$/,'')+'</div></div>'
       + '<div style="text-align:right"><div style="font-size:12px;font-weight:800;color:'+col+'">'+escH(h.recommendation||'HOLD')+'</div>'
       + '<div style="font-size:10px;color:#6B7280">Segnale '+escH(h.signal_action||'HOLD')+' · conf. '+Number(h.confidence||0)+'%</div></div></div>'
