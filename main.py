@@ -88,6 +88,8 @@ PORT              = int(os.getenv("INGRESS_PORT","8099"))
 ASSETS = load_assets()
 CRYPTO_ASSETS_PATH = Path(__file__).parent / "crypto_assets.json"
 CRYPTO_SCHEDULER_MINUTES = 10
+CRYPTO_LIVE_REFRESH_SECONDS = 10
+COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
 
 
 def load_crypto_assets() -> list:
@@ -656,6 +658,44 @@ def run_crypto_scan() -> dict:
     finally:
         state["crypto_running"] = False
 
+
+def fetch_crypto_live_prices() -> dict:
+    assets = CRYPTO_ASSETS
+    ids = [a.get("coingecko_id") for a in assets if a.get("coingecko_id")]
+    if not ids:
+        return {"prices": {}, "updated_at": None}
+    prices = {}
+    try:
+        r = requests.get(
+            COINGECKO_SIMPLE_PRICE_URL,
+            params={
+                "ids": ",".join(ids),
+                "vs_currencies": "eur",
+                "include_24hr_change": "true",
+                "include_last_updated_at": "true",
+            },
+            timeout=8,
+        )
+        r.raise_for_status()
+        data = r.json()
+        for asset in assets:
+            coin_id = asset.get("coingecko_id")
+            if not coin_id or coin_id not in data:
+                continue
+            item = data.get(coin_id, {})
+            prices[asset["symbol"]] = {
+                "price": item.get("eur"),
+                "change_24h_pct": item.get("eur_24h_change"),
+                "updated_at": item.get("last_updated_at"),
+                "name": asset.get("name", asset["symbol"]),
+            }
+        state["crypto_live"] = prices
+        state["crypto_live_last"] = datetime.utcnow().isoformat() + "Z"
+        return {"prices": prices, "updated_at": state["crypto_live_last"], "source": "coingecko_simple_price"}
+    except Exception as e:
+        log.error(f"[CRYPTO] fetch_crypto_live_prices: {e}")
+        return {"prices": state.get("crypto_live", {}), "updated_at": state.get("crypto_live_last"), "source": "cache"}
+
 # Modello Pydantic per asset
 class AssetModel(BaseModel):
     symbol:     str
@@ -721,6 +761,8 @@ state = {
     "crypto_running": False,
     "crypto_email_last": None,
     "crypto_alert_snapshot": {},
+    "crypto_live": {},
+    "crypto_live_last": None,
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -1049,6 +1091,10 @@ async def config():
             "wallet_scheduler_minutes": WALLET_SCHEDULER_MINUTES,
             "income_scheduler_minutes": INCOME_SCHEDULER_MINUTES,
             "crypto_scheduler_minutes": CRYPTO_SCHEDULER_MINUTES,
+            "crypto_live_refresh_seconds": CRYPTO_LIVE_REFRESH_SECONDS,
+            "crypto_live_endpoint": COINGECKO_SIMPLE_PRICE_URL,
+            "crypto_signals_endpoint": "/api/crypto/signals",
+            "crypto_methodology_endpoint": "/api/crypto/methodology",
             "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
             "has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
@@ -1371,6 +1417,11 @@ async def get_crypto_signals(action: Optional[str] = None):
     }
 
 
+@app.get("/api/crypto/live")
+async def get_crypto_live():
+    return fetch_crypto_live_prices()
+
+
 @app.post("/api/crypto/refresh")
 async def refresh_crypto(background_tasks: BackgroundTasks):
     if state.get("crypto_running"):
@@ -1429,8 +1480,13 @@ async def get_crypto_methodology():
             {
                 "type": "REST",
                 "provider": "CoinGecko",
-                "endpoints": ["/simple/price", "/coins/markets", "/coins/{id}/market_chart/range", "/coins/{id}/ohlc/range"],
-                "notes": "Molto utile per snapshot prezzo, mercati e storico OHLC crypto.",
+                "endpoints": [
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    "https://api.coingecko.com/api/v3/coins/markets",
+                    "https://api.coingecko.com/api/v3/coins/{id}/market_chart/range",
+                    "https://api.coingecko.com/api/v3/coins/{id}/ohlc/range",
+                ],
+                "notes": "Usato per snapshot live prezzo EUR; molto utile anche per mercati e storico OHLC crypto.",
             },
             {
                 "type": "REST",

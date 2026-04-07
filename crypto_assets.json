@@ -1,6 +1,7 @@
 [
   {
     "symbol": "BTC-EUR",
+    "coingecko_id": "bitcoin",
     "name": "Bitcoin (BTC)",
     "full_name": "Bitcoin",
     "isin": "N/A - Crypto",
@@ -13,6 +14,7 @@
   },
   {
     "symbol": "ETH-EUR",
+    "coingecko_id": "ethereum",
     "name": "Ethereum (ETH)",
     "full_name": "Ethereum",
     "isin": "N/A - Crypto",
@@ -25,6 +27,7 @@
   },
   {
     "symbol": "SOL-EUR",
+    "coingecko_id": "solana",
     "name": "Solana (SOL)",
     "full_name": "Solana",
     "isin": "N/A - Crypto",
@@ -37,6 +40,7 @@
   },
   {
     "symbol": "XRP-EUR",
+    "coingecko_id": "ripple",
     "name": "Ripple (XRP)",
     "full_name": "Ripple",
     "isin": "N/A - Crypto",
@@ -49,6 +53,7 @@
   },
   {
     "symbol": "ADA-EUR",
+    "coingecko_id": "cardano",
     "name": "Cardano (ADA)",
     "full_name": "Cardano",
     "isin": "N/A - Crypto",
@@ -61,6 +66,7 @@
   },
   {
     "symbol": "DOT-EUR",
+    "coingecko_id": "polkadot",
     "name": "Polkadot (DOT)",
     "full_name": "Polkadot",
     "isin": "N/A - Crypto",
@@ -73,6 +79,7 @@
   },
   {
     "symbol": "MATIC-EUR",
+    "coingecko_id": "matic-network",
     "name": "Polygon (MATIC)",
     "full_name": "Polygon",
     "isin": "N/A - Crypto",
@@ -85,6 +92,7 @@
   },
   {
     "symbol": "DOGE-EUR",
+    "coingecko_id": "dogecoin",
     "name": "Dogecoin (DOGE)",
     "full_name": "Dogecoin",
     "isin": "N/A - Crypto",
@@ -97,6 +105,7 @@
   },
   {
     "symbol": "SHIB-EUR",
+    "coingecko_id": "shiba-inu",
     "name": "Shiba Inu (SHIB)",
     "full_name": "Shiba Inu",
     "isin": "N/A - Crypto",

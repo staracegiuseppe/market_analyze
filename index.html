@@ -690,6 +690,7 @@ function eur(v){ return v === null || v === undefined || v === '' ? '—' : '€
 // ════════════════════════════════════════════════════════════
 let allSignals = [];
 let cryptoSignals = [];
+let cryptoLive = {};
 let fltMkt = 'all', fltAct = 'all';
 let cfg = {};
 let walletData = null;
@@ -1102,6 +1103,7 @@ function buildCard(s){
     + '</div>'+subHtml+'</div>'
     + '<div style="text-align:right;flex-shrink:0;margin-left:16px">'
     + (s.price?'<div style="font-size:18px;font-weight:700;color:#F9FAFB;font-family:monospace">'+eur(s.price)+'</div>':'')
+    + (s.live_change_24h_pct!==undefined && s.live_change_24h_pct!==null?'<div style="font-size:10px;color:'+(s.live_change_24h_pct>=0?'#16A34A':'#DC2626')+';margin-top:2px">24h '+(s.live_change_24h_pct>=0?'+':'')+Number(s.live_change_24h_pct).toFixed(2)+'%</div>':'')
     + (s.original_currency && s.original_currency!=='EUR' && s.original_price?'<div style="font-size:10px;color:#6B7280;margin-top:2px">Origine: '+escH(s.original_currency)+' '+Number(s.original_price).toFixed(2)+'</div>':'')
     + '<div style="font-size:11px;color:#6B7280;margin-top:3px">Score: <span style="color:'+col+';font-weight:700">'+techScore+'</span></div>'
     + divYieldHdr
@@ -1550,10 +1552,21 @@ function renderCryptoSignals(){
     return;
   }
 
-  const buy   = cryptoSignals.filter(s=>s.action==='BUY');
-  const sell  = cryptoSignals.filter(s=>s.action==='SELL');
-  const watch = cryptoSignals.filter(s=>s.action==='WATCHLIST');
-  const hold  = cryptoSignals.filter(s=>!['BUY','SELL','WATCHLIST'].includes(s.action));
+  const enriched = cryptoSignals.map(s => {
+    const live = cryptoLive[s.symbol];
+    if(!live) return s;
+    return {
+      ...s,
+      price: live.price != null ? Number(live.price) : s.price,
+      live_change_24h_pct: live.change_24h_pct,
+      live_updated_at: live.updated_at,
+    };
+  });
+
+  const buy   = enriched.filter(s=>s.action==='BUY');
+  const sell  = enriched.filter(s=>s.action==='SELL');
+  const watch = enriched.filter(s=>s.action==='WATCHLIST');
+  const hold  = enriched.filter(s=>!['BUY','SELL','WATCHLIST'].includes(s.action));
 
   let html = '';
   if(buy.length) html += '<div class="sig-section"><div class="sig-section-hdr buy">🟢 CRYPTO BUY ('+buy.length+')</div>'+buy.map(buildCard).join('')+'</div>';
@@ -1567,6 +1580,21 @@ function renderCryptoSignals(){
       + '</table></div></div>';
   }
   grid.innerHTML = html;
+}
+
+async function loadCryptoLive(){
+  try{
+    const r = await fetch(api('/api/crypto/live'));
+    if(!r.ok) return;
+    const d = await r.json();
+    cryptoLive = d.prices || {};
+    if(d.updated_at){
+      document.getElementById('crypto-meta').innerHTML =
+        document.getElementById('crypto-meta').innerHTML.replace(/ · Live:.*$/, '')
+        + ' · Live: <b style="color:#16A34A">'+fmtTime(d.updated_at)+'</b>';
+    }
+    if(cryptoSignals.length) renderCryptoSignals();
+  }catch(e){}
 }
 
 async function loadCryptoSignals(){
@@ -1596,6 +1624,7 @@ async function loadCryptoSignals(){
         + '<ul style="margin:6px 0 0 18px;color:#9CA3AF;font-size:11px;line-height:1.6">'+logic+'</ul>';
     }
     renderCryptoSignals();
+    loadCryptoLive();
   }catch(e){
     document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto: '+e.message+'</div>';
   }
@@ -2067,6 +2096,9 @@ async function loadSettings(){
       + 'FMP (13F/Fundamentals): <span style="color:'+(cfg.has_fmp?'#16A34A':'#F59E0B')+'">'+(cfg.has_fmp?'✓ configurato':'○ opzionale — configura fmp_api_key')+'</span><br>'
       + 'FRED (Macro USA): <span style="color:'+(cfg.has_fred?'#16A34A':'#F59E0B')+'">'+(cfg.has_fred?'✓ configurato':'○ opzionale — configura fred_api_key')+'</span><br>'
       + 'EIA (Energia): <span style="color:'+(cfg.has_eia?'#16A34A':'#F59E0B')+'">'+(cfg.has_eia?'✓ configurato':'○ opzionale — configura eia_api_key')+'</span><br>'
+      + 'Crypto live REST: <span style="color:#16A34A">'+escH(cfg.crypto_live_endpoint||'—')+'</span><br>'
+      + 'Crypto segnali REST: <span style="color:#60A5FA">'+escH(cfg.crypto_signals_endpoint||'—')+'</span><br>'
+      + 'Crypto metodologia REST: <span style="color:#A78BFA">'+escH(cfg.crypto_methodology_endpoint||'—')+'</span><br>'
       + 'Max LLM/run: <b style="color:#D0DFF8">3 segnali</b> · Layer attivi: <b style="color:#C8A020">'+(cfg.has_fmp?'6':'4')+'/6</b>'
       + '</div>';
 
@@ -2075,6 +2107,8 @@ async function loadSettings(){
       + 'Intervallo: <b style="color:#C8A020">ogni '+cfg.scheduler_minutes+' minuti</b><br>'
       + 'Wallet: <b style="color:#C8A020">ogni '+(cfg.wallet_scheduler_minutes||15)+' minuti</b><br>'
       + 'Rendita: <b style="color:#C8A020">ogni '+(cfg.income_scheduler_minutes||30)+' minuti</b><br>'
+      + 'Crypto segnali: <b style="color:#C8A020">ogni '+(cfg.crypto_scheduler_minutes||10)+' minuti</b><br>'
+      + 'Crypto live: <b style="color:#C8A020">ogni '+(cfg.crypto_live_refresh_seconds||10)+' secondi</b><br>'
       + 'Attivo: <span style="color:'+(cfg.scheduler_enabled?'#16A34A':'#DC2626')+'">'+(cfg.scheduler_enabled?'✓ attivo':'✗ disabilitato')+'</span><br>'
       + 'Finestra: <b style="color:'+wc+'">08:00 – 23:30 ('+wl+')</b>'
       + '</div>';
@@ -2401,12 +2435,14 @@ async function init(){
   // Carica rotazione settoriale in background
   loadSectorRotation().catch(function(e){ console.warn('sector rotation:', e); });
   loadCryptoSignals().catch(function(e){ console.warn('crypto:', e); });
+  loadCryptoLive().catch(function(e){ console.warn('crypto live:', e); });
   loadWallet().catch(function(e){ console.warn('wallet:', e); });
   loadIncomePlan().catch(function(e){ console.warn('income plan:', e); });
   const count = allSignals.length;
   document.getElementById('hdr-count').textContent = count+' asset';
   setInterval(loadSignals, 300000);
   setInterval(loadCryptoSignals, 600000);
+  setInterval(loadCryptoLive, 10000);
   setInterval(loadWallet, 300000);
   setInterval(loadIncomePlan, 1800000);
 }
