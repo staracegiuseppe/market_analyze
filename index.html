@@ -514,6 +514,10 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
       <button class="btn" onclick="refreshCrypto()">↻ Aggiorna crypto</button>
     </div>
   </div>
+  <div class="panel" style="margin-bottom:12px">
+    <div class="ph">🧠 Metodo</div>
+    <div class="pb" id="crypto-methodology">Caricamento metodo crypto...</div>
+  </div>
   <div id="crypto-grid" style="max-width:900px">
     <div style="padding:30px;text-align:center;color:#6B7280">Scansione crypto in avvio...</div>
   </div>
@@ -1567,18 +1571,30 @@ function renderCryptoSignals(){
 
 async function loadCryptoSignals(){
   try{
-    const r = await fetch(api('/api/crypto/signals'));
+    const [r, m] = await Promise.all([
+      fetch(api('/api/crypto/signals')),
+      fetch(api('/api/crypto/methodology')),
+    ]);
     if(!r.ok){
       document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto HTTP '+r.status+'</div>';
       return;
     }
     const d = await r.json();
+    const meth = m.ok ? await m.json() : null;
     cryptoSignals = d.signals || [];
     document.getElementById('crypto-meta').innerHTML =
       'Ultima scansione: <b style="color:#D0DFF8">'+(d.last_run?fmtTime(d.last_run):'—')+'</b>'
       + ' · Prossima: <b style="color:#D0DFF8">'+(d.next_run?fmtTime(d.next_run):'—')+'</b>'
       + ' · Asset: <b style="color:#C8A020">'+cryptoSignals.length+'</b>';
     document.getElementById('crypto-sched').textContent = 'Auto-check ogni '+(cfg.crypto_scheduler_minutes||10)+' min';
+    if(meth){
+      const steps = (meth.current_pipeline || []).map(x => '<div style="padding:6px 0;border-bottom:1px solid #19203022"><b style="color:#D0DFF8">'+x.step+'. '+escH(x.label)+'</b><div style="font-size:11px;color:#6B7280;margin-top:2px">'+escH(x.api)+(x.endpoint_pattern?' · '+escH(x.endpoint_pattern):'')+'</div><div style="font-size:11px;color:#9CA3AF;margin-top:3px">'+escH(x.purpose||'')+'</div></div>').join('');
+      const logic = (meth.reasoning_logic || []).map(x => '<li style="margin-bottom:4px">'+escH(x)+'</li>').join('');
+      document.getElementById('crypto-methodology').innerHTML =
+        '<div style="font-size:11px;color:#D1D5DB;line-height:1.7">'+steps+'</div>'
+        + '<div style="margin-top:10px;font-size:9px;color:#6B7280;letter-spacing:.1em">LOGICA SEGNALE</div>'
+        + '<ul style="margin:6px 0 0 18px;color:#9CA3AF;font-size:11px;line-height:1.6">'+logic+'</ul>';
+    }
     renderCryptoSignals();
   }catch(e){
     document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto: '+e.message+'</div>';

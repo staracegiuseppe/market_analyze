@@ -18,7 +18,7 @@ from scoring_engine         import run_composite_scanner, enrich_with_smart_mone
 from signal_engine          import run_scanner, build_quant_signal, is_trading_hours
 from ai_validation          import apply_ai_enrichment
 from backtest_engine        import backtest_symbol, backtest_batch, BacktestConfig
-from mailer                 import send_report, send_wallet_alert
+from mailer                 import send_report, send_wallet_alert, send_crypto_alert
 from sector_rotation_layer  import fetch_sector_rotation, get_sector_score
 from institutional_layer    import fetch_institutional_score, fetch_all_institutional
 import db
@@ -633,14 +633,25 @@ def run_crypto_scan() -> dict:
             signals.append(_signal_to_eur(sig))
         signals.sort(key=lambda s: (s.get("action") in ("BUY", "SELL", "WATCHLIST"), s.get("confidence", 0), s.get("score", 0)), reverse=True)
         now = datetime.utcnow()
+        current_snapshot = {s["symbol"]: s.get("action") for s in signals if s.get("action") in ("BUY", "SELL")}
+        previous_snapshot = state.get("crypto_alert_snapshot", {}) or {}
+        changed_alerts = [s for s in signals if s.get("action") in ("BUY", "SELL") and previous_snapshot.get(s["symbol"]) != s.get("action")]
         state["crypto_signals"] = signals
         state["crypto_last_run"] = now.isoformat() + "Z"
         state["crypto_next_run"] = (now + timedelta(minutes=CRYPTO_SCHEDULER_MINUTES)).isoformat() + "Z"
+        state["crypto_alert_snapshot"] = current_snapshot
+        if changed_alerts and OPTIONS.get("email_enabled"):
+            try:
+                ok = send_crypto_alert(changed_alerts, OPTIONS)
+                state["crypto_email_last"] = now.isoformat() + "Z" if ok else state.get("crypto_email_last")
+            except Exception as e:
+                log.error(f"[CRYPTO] send_crypto_alert: {e}")
         return {
             "signals": signals,
             "last_run": state["crypto_last_run"],
             "next_run": state["crypto_next_run"],
             "count": len(signals),
+            "email_last": state.get("crypto_email_last"),
         }
     finally:
         state["crypto_running"] = False
@@ -708,6 +719,8 @@ state = {
     "crypto_last_run": None,
     "crypto_next_run": None,
     "crypto_running": False,
+    "crypto_email_last": None,
+    "crypto_alert_snapshot": {},
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -1364,6 +1377,80 @@ async def refresh_crypto(background_tasks: BackgroundTasks):
         return {"status": "already_running"}
     background_tasks.add_task(run_crypto_scan)
     return {"status": "started"}
+
+
+@app.get("/api/crypto/methodology")
+async def get_crypto_methodology():
+    return {
+        "current_pipeline": [
+            {
+                "step": 1,
+                "label": "Market data REST",
+                "api": "Yahoo Finance Chart API",
+                "endpoint_pattern": "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                "purpose": "Scaricare OHLCV giornaliero per BTC-EUR, ETH-EUR, SOL-EUR, XRP-EUR, ADA-EUR, DOT-EUR, MATIC-EUR, DOGE-EUR, SHIB-EUR.",
+            },
+            {
+                "step": 2,
+                "label": "Indicatori tecnici",
+                "api": "Calcolo interno Market Analyze",
+                "purpose": "RSI, medie mobili, MACD, ADX, OBV, Bollinger, ATR, supporti/resistenze, ROC, squeeze, divergenze RSI.",
+            },
+            {
+                "step": 3,
+                "label": "Scoring quantitativo",
+                "api": "Signal engine interno",
+                "purpose": "Trasformare gli indicatori in score, confidence e azione BUY / SELL / WATCHLIST / HOLD.",
+            },
+            {
+                "step": 4,
+                "label": "Normalizzazione EUR",
+                "api": "FX conversion",
+                "endpoint_pattern": "https://api.frankfurter.app/latest?from={currency}&to=EUR",
+                "purpose": "Uniformare tutti i valori mostrati in euro.",
+            },
+            {
+                "step": 5,
+                "label": "Alert email",
+                "api": "SMTP/OAuth2 configurato nell'addon",
+                "purpose": "Inviare mail quando un segnale crypto cambia verso BUY o SELL.",
+            },
+        ],
+        "reasoning_logic": [
+            "Trend: prezzo sopra MA20 e MA50, o sotto di esse.",
+            "Momentum: MACD histogram e incroci MACD.",
+            "Forza: ADX e direzione +DI / -DI.",
+            "Flussi: OBV e conferma volume.",
+            "Estremi: RSI, Bollinger, Stocastico.",
+            "Timing: supporti, resistenze, ATR, risk/reward.",
+            "Output: score numerico, confidence percentuale e livelli operativi.",
+        ],
+        "verified_realtime_providers": [
+            {
+                "type": "REST",
+                "provider": "CoinGecko",
+                "endpoints": ["/simple/price", "/coins/markets", "/coins/{id}/market_chart/range", "/coins/{id}/ohlc/range"],
+                "notes": "Molto utile per snapshot prezzo, mercati e storico OHLC crypto.",
+            },
+            {
+                "type": "REST",
+                "provider": "Coinbase Advanced Trade",
+                "endpoints": ["/api/v3/brokerage/products", "/api/v3/brokerage/products/{product_id}/candles"],
+                "notes": "Utile per metadata e candele di mercato crypto.",
+            },
+            {
+                "type": "REST",
+                "provider": "Kraken",
+                "endpoints": ["/public/OHLC", "/public/Ticker"],
+                "notes": "Utile per OHLC e ticker pubblici su coppie crypto.",
+            },
+            {
+                "type": "AI",
+                "provider": "Perplexity Sonar",
+                "notes": "Adatto a sintesi news e contesto realtime web-grounded; non sostituisce il feed prezzi.",
+            },
+        ],
+    }
 
 @app.post("/api/scanner/refresh")
 async def scanner_refresh(background_tasks: BackgroundTasks):

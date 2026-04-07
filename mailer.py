@@ -306,6 +306,52 @@ def send_wallet_alert(wallet_result: Dict, opts: Dict) -> bool:
     return _dispatch_email(msg, opts)
 
 
+def send_crypto_alert(signals: List[Dict], opts: Dict) -> bool:
+    alerts = [s for s in signals if s.get("action") in ("BUY", "SELL")]
+    if not alerts:
+        return True
+
+    sender    = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
+    recipient = opts.get("email_to")
+    if not sender or not recipient:
+        log.error("[CRYPTO EMAIL] sender/recipient mancanti")
+        return False
+
+    rows = ""
+    for sig in alerts:
+        action = sig.get("action", "HOLD")
+        col = "#16A34A" if action == "BUY" else "#DC2626"
+        reasons = "".join(f"<li>{_tr(r)}</li>" for r in (sig.get("reasons") or [])[:4])
+        rows += (
+            f'<div style="border:1px solid {col}33;border-left:4px solid {col};border-radius:8px;padding:14px 16px;margin-bottom:12px;background:#0B1220">'
+            f'<div style="display:flex;justify-content:space-between;gap:10px">'
+            f'<div><div style="font-size:18px;font-weight:800;color:#F9FAFB">{sig.get("name", sig.get("symbol","?"))}</div>'
+            f'<div style="font-size:11px;color:#9CA3AF">{sig.get("symbol","?")} · {sig.get("exchange","Crypto")}</div></div>'
+            f'<div style="text-align:right"><div style="font-size:12px;font-weight:800;color:{col}">{action}</div>'
+            f'<div style="font-size:10px;color:#9CA3AF">conf. {sig.get("confidence",0)}% · score {sig.get("score",0)}</div></div></div>'
+            f'<div style="font-size:12px;color:#D1D5DB;margin-top:8px">Prezzo: <b>{sig.get("currency","EUR")} {sig.get("price","—")}</b></div>'
+            f'<ul style="margin:10px 0 0 18px;padding:0;color:#C7D2FE;font-size:11px;line-height:1.6">{reasons}</ul>'
+            f'</div>'
+        )
+
+    html = (
+        '<html><body style="background:#07090D;color:#D0DFF8;font-family:Segoe UI,Arial,sans-serif;padding:20px">'
+        '<div style="max-width:760px;margin:0 auto">'
+        '<div style="font-size:22px;font-weight:900;color:#F9FAFB;margin-bottom:6px">Alert Trading Crypto</div>'
+        '<div style="font-size:12px;color:#94A3B8;margin-bottom:18px">Sono stati rilevati segnali BUY/SELL sulle crypto monitorate.</div>'
+        f'{rows}'
+        '<div style="margin-top:16px;font-size:10px;color:#64748B">Messaggio automatico di Market Analyze. Le crypto sono altamente volatili: valida sempre liquidita\' e gestione del rischio.</div>'
+        '</div></body></html>'
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"[Market Analyze] Alert crypto: {len(alerts)} segnale/i"
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    return _dispatch_email(msg, opts)
+
+
 # ── Card segnale completa ─────────────────────────────────────────────────────
 def _card(r: dict) -> str:
     action    = r.get("action", "HOLD")
