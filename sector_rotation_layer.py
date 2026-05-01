@@ -178,14 +178,22 @@ def fetch_sector_rotation() -> Dict:
         "MIXED"
     )
 
+    ranking_1m = []
+    for sector_name, _ in ranked:
+        d = classified[sector_name]
+        ranking_1m.append({
+            "sector": sector_name,
+            "rs_1m": d["rs_1m"],
+            "status": d["status"],
+        })
+
     result = {
         "available":       True,
         "timestamp":       datetime.now().isoformat(),
         "spy_1m":          spy_1m,
         "spy_3m":          spy_3m,
         "sectors":         classified,
-        "ranking_1m":      [{"sector": s, "rs_1m": d["rs_1m"], "status": d["status"]}
-                            for s,d in ranked],
+        "ranking_1m":      ranking_1m,
         "leaders":         leaders,
         "improving":       improving,
         "lagging":         lagging,

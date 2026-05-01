@@ -22,6 +22,7 @@ log = logging.getLogger("institutional")
 _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 _CACHE: Dict[str, Dict] = {}
 _CACHE_TTL = 6 * 3600  # 6 ore — dati 13F cambiano lentamente
+_FMP_STATE: Dict[str, object] = {"blocked_until": 0.0, "reason": None, "http_status": None}
 
 # ── HTTP session ──────────────────────────────────────────────────────────────
 _session: Optional[requests.Session] = None
@@ -36,18 +37,38 @@ def _sess() -> requests.Session:
 def _fmp(endpoint: str, fmp_key: str, params: dict = None) -> Optional[object]:
     if not fmp_key:
         return None
+    if _FMP_STATE.get("blocked_until", 0) > time.time():
+        return None
     p = {"apikey": fmp_key}
     if params:
         p.update(params)
     try:
         r = _sess().get(f"{_FMP_BASE}/{endpoint}", params=p, timeout=15)
         if r.status_code == 200:
+            _FMP_STATE.update({"blocked_until": 0.0, "reason": None, "http_status": 200})
             d = r.json()
             return d if d else None
+        if r.status_code in (401, 403):
+            _FMP_STATE.update({
+                "blocked_until": time.time() + 1800,
+                "reason": "fmp_auth_or_plan_error",
+                "http_status": r.status_code,
+            })
         log.warning(f"[INST] FMP {endpoint}: HTTP {r.status_code}")
     except Exception as e:
         log.warning(f"[INST] FMP {endpoint}: {e}")
     return None
+
+
+def _provider_unavailable_detail(note: str = "Provider FMP non disponibile") -> Dict:
+    return {
+        "available": False,
+        "provider_unavailable": True,
+        "provider": "FMP",
+        "http_status": _FMP_STATE.get("http_status"),
+        "reason": _FMP_STATE.get("reason") or "provider_unavailable",
+        "note": note,
+    }
 
 
 # ── A. SMART MONEY ACCUMULATION/DISTRIBUTION (13F QoQ) ────────────────────────
@@ -247,9 +268,17 @@ def fetch_institutional_score(symbol: str, asset_type: str, fmp_key: str) -> Dic
         return {
             "institutional_score": 0,
             "institutional_detail": {
+                "available": False,
+                "provider_unavailable": True,
                 "note": "FMP API key non configurata",
                 "signal_13f": "no_key", "signal_insider": "no_key",
             },
+        }
+    if _FMP_STATE.get("blocked_until", 0) > time.time():
+        return {
+            "institutional_score": 0,
+            "available": False,
+            "institutional_detail": _provider_unavailable_detail("FMP ha risposto 401/403: key non valida, piano insufficiente o quota bloccata"),
         }
 
     # Cache check
@@ -269,7 +298,9 @@ def fetch_institutional_score(symbol: str, asset_type: str, fmp_key: str) -> Dic
             score = 2 if n_holders > 100 else 1 if n_holders > 20 else 0
             result = {
                 "institutional_score": score,
+                "available": True,
                 "institutional_detail": {
+                    "available": True,
                     "signal": "etf_institutional_support",
                     "holders_count": n_holders,
                     "note": "ETF: analisi holder (non 13F)",
@@ -277,7 +308,9 @@ def fetch_institutional_score(symbol: str, asset_type: str, fmp_key: str) -> Dic
             }
             _CACHE[cache_key] = result
             return result
-        return {"institutional_score": 0, "institutional_detail": {"signal": "etf_no_data"}}
+        if _FMP_STATE.get("blocked_until", 0) > time.time():
+            return {"institutional_score": 0, "available": False, "institutional_detail": _provider_unavailable_detail("FMP ETF holder non disponibile")}
+        return {"institutional_score": 0, "available": False, "institutional_detail": {"signal": "etf_no_data", "available": False}}
 
     # Stocks: analisi completa
     score_13f,    detail_13f    = _score_13f(symbol, fmp_key)
@@ -305,7 +338,9 @@ def fetch_institutional_score(symbol: str, asset_type: str, fmp_key: str) -> Dic
 
     result = {
         "institutional_score": final_score,
+        "available": True,
         "institutional_detail": {
+            "available": True,
             "narrative":      narrative,
             "score_13f":      score_13f,
             "score_insider":  score_insider,
@@ -328,6 +363,13 @@ def fetch_all_institutional(assets: List[Dict], fmp_key: str) -> Dict[str, Dict]
     for i, asset in enumerate(assets):
         sym  = asset["symbol"]
         atype= asset.get("asset_type","stock")
+        if _FMP_STATE.get("blocked_until", 0) > time.time():
+            results[sym] = {
+                "institutional_score": 0,
+                "available": False,
+                "institutional_detail": _provider_unavailable_detail("FMP bloccato dopo risposta 401/403"),
+            }
+            continue
         results[sym] = fetch_institutional_score(sym, atype, fmp_key)
         if i < len(assets) - 1:
             time.sleep(0.5)  # 120 req/min FMP free tier

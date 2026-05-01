@@ -1065,8 +1065,11 @@ def run_scan():
             log.info("[STEP 2d/5 INST] Fetch dati istituzionali FMP (13F + insider)...")
             inst_db = fetch_all_institutional(ASSETS, FMP_KEY)
             state["institutional_db"] = inst_db
-            ok_inst = sum(1 for v in inst_db.values() if v.get("institutional_score",0) != 0)
-            log.info(f"[STEP 2d/5 INST] {ok_inst}/{len(inst_db)} asset con dati istituzionali")
+            ok_inst = sum(1 for v in inst_db.values() if v.get("available", True))
+            unavailable = [k for k, v in inst_db.items() if v.get("institutional_detail", {}).get("provider_unavailable")]
+            if unavailable:
+                log.warning(f"[STEP 2d/5 INST] provider FMP non disponibile per {len(unavailable)}/{len(inst_db)} asset")
+            log.info(f"[STEP 2d/5 INST] {ok_inst}/{len(inst_db)} asset con layer istituzionale disponibile")
         except Exception as e:
             log.error(f"[STEP 2d/5 INST] errore: {e}")
     elif not FMP_KEY:

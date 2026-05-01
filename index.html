@@ -690,11 +690,13 @@ function api(path){
   const override = localStorage.getItem('marketAnalyzeApiBase');
   if(override) return override.replace(/\/+$/, '') + path;
   if(window.location.protocol === 'file:') return 'http://127.0.0.1:8099' + path;
-  if(window.location.origin && /^https?:/i.test(window.location.origin)) return window.location.origin + path;
   const base = window.location.pathname
     .replace(/\/(index\.html|[^/]+\.[^/]+)$/, '')
     .replace(/\/+$/, '');
-  return base + path;
+  if(window.location.origin && /^https?:/i.test(window.location.origin)){
+    return new URL((base || '') + path, window.location.origin).toString();
+  }
+  return (base || '') + path;
 }
 function fmtTime(t){
   try{ return new Date(t).toLocaleTimeString('it',{hour:'2-digit',minute:'2-digit'}); }

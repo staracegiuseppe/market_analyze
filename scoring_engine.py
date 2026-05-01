@@ -186,6 +186,18 @@ def _confidence(
     return max(0, min(99, int(base)))
 
 
+def _is_layer_available(detail: Optional[Dict], score: Optional[float] = None) -> bool:
+    if detail is None:
+        return False
+    if detail.get("provider_unavailable") is True:
+        return False
+    if detail.get("available") is False:
+        return False
+    if detail.get("signal") in ("no_rotation_data", "sector_not_classified", "sector_data_missing", "no_key"):
+        return False
+    return score is None or score is not None
+
+
 def composite_signal(
     # Layer tecnico (da signal_engine)
     technical_signal: Dict,
@@ -259,6 +271,13 @@ def composite_signal(
             sector_score  = sec_score_rt
             sector_detail = sec_detail_rt
 
+    # ── Disponibilità layer ───────────────────────────────────────────────────
+    sector_available = _is_layer_available(sector_detail, sector_score)
+    fund_available = bool(fundamental_data) and not (f_detail.get("source") == "none") and _is_layer_available(f_detail, f_score)
+    inst_available = bool(institutional_data or (fundamental_data and fundamental_data.get("institutional_detail"))) and _is_layer_available(i_detail, i_score)
+    macro_available = bool(macro_ctx)
+    regime_available = bool(macro_ctx)
+
     # ── Composite score pesato ────────────────────────────────────────────────
     # Scala ogni layer a [-100, +100] prima di pesare
     def _to100(v, rng):
@@ -273,27 +292,41 @@ def composite_signal(
     inst_100   = _to100(i_score,      RANGES["institutional"])
     fund_100   = _to100(f_score,      RANGES["fundamental"])
 
-    composite_raw = (
-        tech_100   * WEIGHTS["technical"]
-      + macro_100  * WEIGHTS["macro"]
-      + regime_100 * WEIGHTS["regime"]
-      + sector_100 * WEIGHTS["sector"]
-      + inst_100   * WEIGHTS["institutional"]
-      + fund_100   * WEIGHTS["fundamental"]
-    )
+    weighted_layers = [("technical", tech_100, WEIGHTS["technical"])]
+    if macro_available and macro_score != 0:
+        weighted_layers.append(("macro", macro_100, WEIGHTS["macro"]))
+    if regime_available and regime_score != 0:
+        weighted_layers.append(("regime", regime_100, WEIGHTS["regime"]))
+    if sector_available and sector_score != 0:
+        weighted_layers.append(("sector", sector_100, WEIGHTS["sector"]))
+    if inst_available and i_score != 0:
+        weighted_layers.append(("institutional", inst_100, WEIGHTS["institutional"]))
+    if fund_available and f_score != 0:
+        weighted_layers.append(("fundamental", fund_100, WEIGHTS["fundamental"]))
+
+    weight_sum = sum(w for _, _, w in weighted_layers) or WEIGHTS["technical"]
+    composite_raw = sum(v * w for _, v, w in weighted_layers) / weight_sum
 
     # Penalizzazioni per conflitti tra layer
-    penalty = _penalize_conflicts(tech_norm, macro_score, regime_score, i_score)
+    penalty = _penalize_conflicts(tech_norm, macro_score if macro_available else 0, regime_score if regime_available else 0, i_score if inst_available else 0)
     composite_final = composite_raw - (penalty if composite_raw > 0 else -penalty)
     composite_int   = max(-100, min(100, int(composite_final)))
 
     # ── Layer agreement ───────────────────────────────────────────────────────
     direction = 1 if composite_int > 0 else -1
-    scores_dir = [
-        tech_norm, macro_score, regime_score, sector_score, f_score, i_score
-    ]
+    scores_dir = [tech_norm]
+    if macro_available and macro_score != 0:
+        scores_dir.append(macro_score)
+    if regime_available and regime_score != 0:
+        scores_dir.append(regime_score)
+    if sector_available and sector_score != 0:
+        scores_dir.append(sector_score)
+    if f_score != 0 and fund_available:
+        scores_dir.append(f_score)
+    if i_score != 0 and inst_available:
+        scores_dir.append(i_score)
     agreeing = sum(1 for s in scores_dir if s * direction > 0)
-    agreement_pct = agreeing / len(scores_dir)
+    agreement_pct = agreeing / max(1, len(scores_dir))
 
     # ── Azione finale ─────────────────────────────────────────────────────────
     # Se il tecnico dice NO_DATA, mantieni NO_DATA
@@ -376,6 +409,13 @@ def composite_signal(
             "data": macro_ctx.get("data", {}) if macro_ctx else {},
         } if macro_ctx else {},
         "sector_alignment":  sector_detail.get("alignment", "neutral"),
+        "layer_availability": {
+            "macro": macro_available,
+            "regime": regime_available,
+            "sector": sector_available,
+            "fundamental": fund_available,
+            "institutional": inst_available,
+        },
         "layer_agreement":   round(agreement_pct, 2),
         "composite_reasons": composite_reasons[:5],
         "fundamental_detail":f_detail,
