@@ -514,6 +514,20 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
       <button class="btn" onclick="refreshCrypto()">↻ Aggiorna crypto</button>
     </div>
   </div>
+  <div id="crypto-live-board" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:12px"></div>
+  <div class="panel" style="margin-bottom:12px">
+    <div class="ph">📈 Mercato Live</div>
+    <div class="pb" style="padding:0">
+      <div style="overflow:auto">
+        <table class="trade-table" style="width:100%">
+          <thead><tr><th>Crypto</th><th>Prezzo</th><th>24h</th><th>Segnale</th><th>Conf.</th><th>Bias</th></tr></thead>
+          <tbody id="crypto-live-body">
+            <tr><td colspan="6" style="padding:24px;text-align:center;color:#6B7280">Caricamento mercato crypto...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
   <div class="panel" style="margin-bottom:12px">
     <div class="ph">🧠 Metodo</div>
     <div class="pb" id="crypto-methodology">Caricamento metodo crypto...</div>
@@ -1582,6 +1596,58 @@ function renderCryptoSignals(){
   grid.innerHTML = html;
 }
 
+function renderCryptoLiveBoard(){
+  const board = document.getElementById('crypto-live-board');
+  const tbody = document.getElementById('crypto-live-body');
+  const rows = cryptoSignals.map(s => {
+    const live = cryptoLive[s.symbol] || {};
+    const price = live.price != null ? live.price : s.price;
+    const change = live.change_24h_pct;
+    const act = s.action || 'HOLD';
+    const actCol = colAct(act);
+    const bias = change == null ? '—' : change >= 2 ? 'Momentum ↑' : change <= -2 ? 'Pressione ↓' : 'Laterale';
+    return {
+      symbol: s.symbol,
+      name: s.name || s.full_name || s.symbol,
+      price,
+      change,
+      action: act,
+      actionColor: actCol,
+      confidence: s.confidence || 0,
+      bias,
+    };
+  });
+
+  if(!rows.length){
+    board.innerHTML = '';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#6B7280">Nessun dato live disponibile.</td></tr>';
+    return;
+  }
+
+  board.innerHTML = rows.map(r =>
+    '<div class="panel"><div class="pb">'
+    + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:6px">'
+    + '<div><div style="font-size:14px;font-weight:800;color:#F9FAFB">'+escH(r.name)+'</div>'
+    + '<div style="font-size:10px;color:#6B7280">'+escH(r.symbol)+'</div></div>'
+    + '<div style="font-size:10px;font-weight:700;color:'+r.actionColor+'">'+escH(r.action)+'</div></div>'
+    + '<div style="font-size:20px;font-weight:900;color:#D0DFF8">'+eur(r.price)+'</div>'
+    + '<div style="margin-top:4px;font-size:11px;color:'+(r.change>=0?'#16A34A':'#DC2626')+'">'+(r.change==null?'—':(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'% 24h')+'</div>'
+    + '<div style="margin-top:8px;height:6px;background:#1F2937;border-radius:4px"><div style="height:6px;width:'+Math.min(100,Math.abs(r.change||0)*4+8)+'%;background:'+(r.change>=0?'#16A34A':'#DC2626')+';border-radius:4px"></div></div>'
+    + '</div></div>'
+  ).join('');
+
+  tbody.innerHTML = rows.map(r =>
+    '<tr>'
+    + '<td><div style="color:#F9FAFB;font-weight:700">'+escH(r.name)+'</div><div style="font-size:10px;color:#6B7280">'+escH(r.symbol)+'</div></td>'
+    + '<td style="font-family:monospace">'+eur(r.price)+'</td>'
+    + '<td style="color:'+(r.change>=0?'#16A34A':'#DC2626')+'">'+(r.change==null?'—':(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'%')+'</td>'
+    + '<td style="color:'+r.actionColor+';font-weight:700">'+escH(r.action)+'</td>'
+    + '<td>'+Number(r.confidence).toFixed(0)+'%</td>'
+    + '<td style="color:#9CA3AF">'+escH(r.bias)+'</td>'
+    + '</tr>'
+  ).join('');
+}
+
 async function loadCryptoLive(){
   try{
     const r = await fetch(api('/api/crypto/live'));
@@ -1593,7 +1659,10 @@ async function loadCryptoLive(){
         document.getElementById('crypto-meta').innerHTML.replace(/ · Live:.*$/, '')
         + ' · Live: <b style="color:#16A34A">'+fmtTime(d.updated_at)+'</b>';
     }
-    if(cryptoSignals.length) renderCryptoSignals();
+    if(cryptoSignals.length){
+      renderCryptoSignals();
+      renderCryptoLiveBoard();
+    }
   }catch(e){}
 }
 
@@ -1624,6 +1693,7 @@ async function loadCryptoSignals(){
         + '<ul style="margin:6px 0 0 18px;color:#9CA3AF;font-size:11px;line-height:1.6">'+logic+'</ul>';
     }
     renderCryptoSignals();
+    renderCryptoLiveBoard();
     loadCryptoLive();
   }catch(e){
     document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto: '+e.message+'</div>';
@@ -2070,9 +2140,13 @@ function addLog(msg, cls){
 // ════════════════════════════════════════════════════════════
 async function loadSettings(){
   try{
-    const r = await fetch(api('/api/config'));
+    const [r, er] = await Promise.all([
+      fetch(api('/api/config')),
+      fetch(api('/api/email/status')),
+    ]);
     if(!r.ok) return;
     cfg = await r.json();
+    const emailStatus = er.ok ? await er.json() : null;
 
     const wc = cfg.trading_window?'#16A34A':'#6B7280';
     const wl = cfg.trading_window?'Aperta':'Chiusa';
@@ -2099,6 +2173,7 @@ async function loadSettings(){
       + 'Crypto live REST: <span style="color:#16A34A">'+escH(cfg.crypto_live_endpoint||'—')+'</span><br>'
       + 'Crypto segnali REST: <span style="color:#60A5FA">'+escH(cfg.crypto_signals_endpoint||'—')+'</span><br>'
       + 'Crypto metodologia REST: <span style="color:#A78BFA">'+escH(cfg.crypto_methodology_endpoint||'—')+'</span><br>'
+      + 'Diagnostica email REST: <span style="color:#F59E0B">/api/email/status</span><br>'
       + 'Max LLM/run: <b style="color:#D0DFF8">3 segnali</b> · Layer attivi: <b style="color:#C8A020">'+(cfg.has_fmp?'6':'4')+'/6</b>'
       + '</div>';
 
@@ -2109,14 +2184,18 @@ async function loadSettings(){
       + 'Rendita: <b style="color:#C8A020">ogni '+(cfg.income_scheduler_minutes||30)+' minuti</b><br>'
       + 'Crypto segnali: <b style="color:#C8A020">ogni '+(cfg.crypto_scheduler_minutes||10)+' minuti</b><br>'
       + 'Crypto live: <b style="color:#C8A020">ogni '+(cfg.crypto_live_refresh_seconds||10)+' secondi</b><br>'
+      + 'Policy email equity: <b style="color:#D0DFF8">'+escH(cfg.email_signal_mode||'strong_only')+'</b><br>'
+      + 'Policy email crypto: <b style="color:#D0DFF8">'+escH(cfg.crypto_email_mode||'state_change')+'</b><br>'
       + 'Attivo: <span style="color:'+(cfg.scheduler_enabled?'#16A34A':'#DC2626')+'">'+(cfg.scheduler_enabled?'✓ attivo':'✗ disabilitato')+'</span><br>'
       + 'Finestra: <b style="color:'+wc+'">08:00 – 23:30 ('+wl+')</b>'
       + '</div>';
 
+    const eqReasons = emailStatus?.equity?.reasons || [];
+    const crReasons = emailStatus?.crypto?.reasons || [];
     document.getElementById('cfg-email').innerHTML =
       '<div style="font-size:11px;line-height:2.4;color:#6880A0">'
       + 'Abilitata: <span style="color:'+(cfg.email_enabled?'#16A34A':'#6B7280')+'">'+(cfg.email_enabled?'✓':'✗ — imposta email_enabled: true nel config')+'</span>'
-      + (cfg.email_enabled?'<br>A: <b style="color:#D0DFF8">'+cfg.email_to+'</b><br>Score minimo: <b style="color:#C8A020">'+cfg.email_min_score+'</b><br>Alert wallet: <b style="color:'+(cfg.wallet_email_alerts_enabled?'#16A34A':'#6B7280')+'">'+(cfg.wallet_email_alerts_enabled?'attivi':'disattivi')+'</b>':'')
+      + (cfg.email_enabled?'<br>A: <b style="color:#D0DFF8">'+cfg.email_to+'</b><br>Score minimo: <b style="color:#C8A020">'+cfg.email_min_score+'</b><br>Trasporto: <b style="color:#16A34A">sistema principale condiviso</b><br>Require trading window: <b style="color:'+(cfg.email_require_trading_window?'#F59E0B':'#16A34A')+'">'+(cfg.email_require_trading_window?'si':'no')+'</b><br>Alert wallet: <b style="color:'+(cfg.wallet_email_alerts_enabled?'#16A34A':'#6B7280')+'">'+(cfg.wallet_email_alerts_enabled?'attivi':'disattivi')+'</b><br>Alert crypto: <b style="color:'+(cfg.crypto_email_enabled?'#16A34A':'#6B7280')+'">'+(cfg.crypto_email_enabled?'attivi':'disattivi')+'</b><br>Ultima causa equity: <b style="color:#D0DFF8">'+escH((emailStatus?.equity?.last_reason)||'—')+'</b><br>Ultima causa crypto: <b style="color:#D0DFF8">'+escH((emailStatus?.crypto?.last_reason)||'—')+'</b><br>Blocchi equity: <span style="color:#F59E0B">'+escH(eqReasons.join(', ') || 'nessuno')+'</span><br>Blocchi crypto: <span style="color:#F59E0B">'+escH(crReasons.join(', ') || 'nessuno')+'</span>':'')
       + '</div>';
 
   }catch(e){ console.error('loadSettings:', e); }

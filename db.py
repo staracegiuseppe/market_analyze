@@ -216,6 +216,17 @@ def _create_schema():
             plan_json             MEDIUMTEXT
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS crypto_alerts (
+            id                    INT AUTO_INCREMENT PRIMARY KEY,
+            created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            symbol                VARCHAR(32) NOT NULL,
+            action                VARCHAR(16) NOT NULL,
+            confidence            INT DEFAULT 0,
+            payload_json          MEDIUMTEXT,
+            INDEX idx_crypto_alert_symbol_created (symbol, created_at)
+        )
+        """,
     ]
     conn = _connect()
     try:
@@ -870,6 +881,55 @@ def save_income_plan(plan: Dict) -> Optional[int]:
     except Exception as e:
         log.error(f"[DB] save_income_plan: {e}")
         return None
+
+
+def get_latest_crypto_alert(symbol: str) -> Optional[Dict]:
+    if not _enabled:
+        return None
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT created_at, action, confidence, payload_json
+                FROM crypto_alerts
+                WHERE symbol=%s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (symbol.upper(),))
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        out = dict(row)
+        if out.get("created_at") and hasattr(out["created_at"], "isoformat"):
+            out["created_at"] = out["created_at"].isoformat()
+        return out
+    except Exception as e:
+        log.error(f"[DB] get_latest_crypto_alert ({symbol}): {e}")
+        return None
+
+
+def save_crypto_alert(symbol: str, action: str, confidence: int, payload: Dict) -> bool:
+    if not _enabled:
+        return False
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO crypto_alerts
+                    (symbol, action, confidence, payload_json)
+                VALUES (%s, %s, %s, %s)
+            """, (
+                symbol.upper(),
+                action,
+                confidence,
+                json.dumps(payload, default=str),
+            ))
+        conn.close()
+        return True
+    except Exception as e:
+        log.error(f"[DB] save_crypto_alert ({symbol}): {e}")
+        return False
 
 
 def get_income_history(days: int = 7) -> List[Dict]:

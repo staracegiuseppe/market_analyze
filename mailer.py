@@ -598,9 +598,16 @@ def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict, smart
 
     min_score = int(cfg.get("email_min_score",40))
     active    = [r for r in results if r.get("action") in ("BUY","SELL","WATCHLIST")]
-    strong    = [r for r in active if abs(r.get("score",0)) >= min_score]
-    if not strong:
-        log.info(f"[MAILER] Nessun segnale con |score| >= {min_score}"); return False
+    mode      = str(cfg.get("email_signal_mode", "strong_only")).lower()
+    if mode == "any_active":
+        selected = active
+    elif mode == "buy_sell_only":
+        selected = [r for r in active if r.get("action") in ("BUY", "SELL")]
+    else:
+        selected = [r for r in active if abs(r.get("score",0)) >= min_score]
+    if not selected:
+        log.info(f"[MAILER] Nessun segnale compatibile con policy={mode} e soglia={min_score}")
+        return False
 
     html_body = build_html_report(results, run_ts, next_ts, smart_money_data)
 

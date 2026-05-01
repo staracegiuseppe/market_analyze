@@ -1,5 +1,5 @@
 name: Market Analyze
-version: "3.2.7"
+version: "3.2.8"
 slug: market_analyze
 description: Multi-Market Scanner - Italy / Europe / USA - Quant Signals + Claude AI + Perplexity + Backtest + Gmail OAuth2.
 url: https://github.com/staracegiuseppe/market_analyze
@@ -38,7 +38,11 @@ options:
   enable_fundamental_layer: false
   macro_update_hours: 4
   email_enabled: false
+  email_require_trading_window: false
+  email_signal_mode: "strong_only"
   wallet_email_alerts_enabled: true
+  crypto_email_enabled: true
+  crypto_email_mode: "state_change"
   email_to: ""
   email_from: ""
   oauth2_client_id: ""
@@ -71,7 +75,11 @@ schema:
   enable_fundamental_layer: bool
   macro_update_hours: int
   email_enabled: bool
+  email_require_trading_window: bool
+  email_signal_mode: str
   wallet_email_alerts_enabled: bool
+  crypto_email_enabled: bool
+  crypto_email_mode: str
   email_to: str
   email_from: str
   oauth2_client_id: str

@@ -46,7 +46,11 @@ def load_options() -> dict:
         "income_scheduler_minutes":   int(os.getenv("INCOME_SCHEDULER_MINUTES","30")),
         "scheduler_enabled":          True,
         "email_enabled":              False,
+        "email_require_trading_window": False,
+        "email_signal_mode":          os.getenv("EMAIL_SIGNAL_MODE", "strong_only"),
         "wallet_email_alerts_enabled": True,
+        "crypto_email_enabled":       True,
+        "crypto_email_mode":          os.getenv("CRYPTO_EMAIL_MODE", "state_change"),
         "email_to":   os.getenv("EMAIL_TO",""),    "email_from": os.getenv("EMAIL_FROM",""),
         "smtp_host":  os.getenv("SMTP_HOST","smtp.gmail.com"),
         "smtp_port":  int(os.getenv("SMTP_PORT","587")),
@@ -82,6 +86,10 @@ WALLET_SCHEDULER_MINUTES = int(OPTIONS.get("wallet_scheduler_minutes",15))
 INCOME_SCHEDULER_MINUTES = int(OPTIONS.get("income_scheduler_minutes",30))
 SCHEDULER_ENABLED = bool(OPTIONS.get("scheduler_enabled",True))
 WALLET_ALERTS_ENABLED = bool(OPTIONS.get("wallet_email_alerts_enabled", OPTIONS.get("email_enabled", False)))
+EMAIL_REQUIRE_TRADING_WINDOW = bool(OPTIONS.get("email_require_trading_window", False))
+EMAIL_SIGNAL_MODE = str(OPTIONS.get("email_signal_mode", "strong_only")).lower()
+CRYPTO_EMAIL_ENABLED = bool(OPTIONS.get("crypto_email_enabled", OPTIONS.get("email_enabled", False)))
+CRYPTO_EMAIL_MODE = str(OPTIONS.get("crypto_email_mode", "state_change")).lower()
 BIND_HOST         = os.getenv("BIND_HOST","0.0.0.0")
 PORT              = int(os.getenv("INGRESS_PORT","8099"))
 
@@ -637,23 +645,48 @@ def run_crypto_scan() -> dict:
         now = datetime.utcnow()
         current_snapshot = {s["symbol"]: s.get("action") for s in signals if s.get("action") in ("BUY", "SELL")}
         previous_snapshot = state.get("crypto_alert_snapshot", {}) or {}
-        changed_alerts = [s for s in signals if s.get("action") in ("BUY", "SELL") and previous_snapshot.get(s["symbol"]) != s.get("action")]
+        actionable = [s for s in signals if s.get("action") in ("BUY", "SELL")]
+        changed_alerts = []
+        for s in actionable:
+            prev_action = None
+            if db.is_enabled():
+                last_db = db.get_latest_crypto_alert(s["symbol"])
+                prev_action = last_db.get("action") if last_db else None
+            if prev_action is None:
+                prev_action = previous_snapshot.get(s["symbol"])
+            if prev_action != s.get("action"):
+                changed_alerts.append(s)
         state["crypto_signals"] = signals
         state["crypto_last_run"] = now.isoformat() + "Z"
         state["crypto_next_run"] = (now + timedelta(minutes=CRYPTO_SCHEDULER_MINUTES)).isoformat() + "Z"
         state["crypto_alert_snapshot"] = current_snapshot
-        if changed_alerts and OPTIONS.get("email_enabled"):
+        crypto_diag = _evaluate_crypto_email_status(signals)
+        state["last_crypto_email_reason"] = ",".join(crypto_diag["reasons"]) if crypto_diag["reasons"] else "sent_or_sendable"
+        if crypto_diag["ok_to_send"]:
             try:
-                ok = send_crypto_alert(changed_alerts, OPTIONS)
+                mode = CRYPTO_EMAIL_MODE
+                to_send = changed_alerts if mode == "state_change" else actionable
+                if not to_send:
+                    state["last_crypto_email_reason"] = "no_crypto_state_change"
+                    ok = False
+                else:
+                    ok = send_crypto_alert(to_send, OPTIONS)
+                    if ok and db.is_enabled():
+                        for sig in to_send:
+                            db.save_crypto_alert(sig["symbol"], sig.get("action", ""), int(sig.get("confidence", 0)), sig)
+                    elif not ok and state["last_crypto_email_reason"] == "sent_or_sendable":
+                        state["last_crypto_email_reason"] = "mailer_returned_false"
                 state["crypto_email_last"] = now.isoformat() + "Z" if ok else state.get("crypto_email_last")
             except Exception as e:
                 log.error(f"[CRYPTO] send_crypto_alert: {e}")
+                state["last_crypto_email_reason"] = f"exception:{type(e).__name__}"
         return {
             "signals": signals,
             "last_run": state["crypto_last_run"],
             "next_run": state["crypto_next_run"],
             "count": len(signals),
             "email_last": state.get("crypto_email_last"),
+            "email_reason": state.get("last_crypto_email_reason"),
         }
     finally:
         state["crypto_running"] = False
@@ -695,6 +728,90 @@ def fetch_crypto_live_prices() -> dict:
     except Exception as e:
         log.error(f"[CRYPTO] fetch_crypto_live_prices: {e}")
         return {"prices": state.get("crypto_live", {}), "updated_at": state.get("crypto_live_last"), "source": "cache"}
+
+
+def _email_credentials_status() -> dict:
+    sender = OPTIONS.get("email_from", "")
+    recipient = OPTIONS.get("email_to", "")
+    has_oauth = bool(OPTIONS.get("oauth2_client_id")) and bool(OPTIONS.get("oauth2_client_secret")) and bool(OPTIONS.get("oauth2_refresh_token"))
+    has_smtp = bool(OPTIONS.get("smtp_user")) and bool(OPTIONS.get("smtp_password"))
+    return {
+        "has_sender": bool(sender),
+        "has_recipient": bool(recipient),
+        "has_oauth": has_oauth,
+        "has_smtp": has_smtp,
+        "sender": sender,
+        "recipient": recipient,
+    }
+
+
+def _select_equity_email_candidates(signals: list) -> dict:
+    active = [r for r in signals if r.get("action") in ("BUY", "SELL", "WATCHLIST")]
+    mode = EMAIL_SIGNAL_MODE
+    if mode == "any_active":
+        selected = active
+    elif mode == "buy_sell_only":
+        selected = [r for r in active if r.get("action") in ("BUY", "SELL")]
+    else:
+        selected = [r for r in active if abs(r.get("score", 0)) >= int(OPTIONS.get("email_min_score", 40))]
+    return {"mode": mode, "active": active, "selected": selected}
+
+
+def _evaluate_equity_email_status(signals: list) -> dict:
+    creds = _email_credentials_status()
+    reasons = []
+    if not OPTIONS.get("email_enabled"):
+        reasons.append("email_disabled")
+    if EMAIL_REQUIRE_TRADING_WINDOW and not is_trading_hours():
+        reasons.append("outside_trading_window")
+    if not creds["has_sender"]:
+        reasons.append("missing_email_from")
+    if not creds["has_recipient"]:
+        reasons.append("missing_email_to")
+    if not (creds["has_oauth"] or creds["has_smtp"]):
+        reasons.append("missing_transport_credentials")
+    sel = _select_equity_email_candidates(signals)
+    if not sel["active"]:
+        reasons.append("no_active_signals")
+    elif not sel["selected"]:
+        reasons.append("no_signals_matching_policy")
+    return {
+        "ok_to_send": len(reasons) == 0,
+        "reasons": reasons,
+        "credentials": creds,
+        "active_count": len(sel["active"]),
+        "selected_count": len(sel["selected"]),
+        "selected_symbols": [s.get("symbol") for s in sel["selected"][:10]],
+        "policy_mode": sel["mode"],
+        "require_trading_window": EMAIL_REQUIRE_TRADING_WINDOW,
+        "min_score": int(OPTIONS.get("email_min_score", 40)),
+    }
+
+
+def _evaluate_crypto_email_status(signals: list) -> dict:
+    creds = _email_credentials_status()
+    reasons = []
+    if not OPTIONS.get("email_enabled"):
+        reasons.append("email_disabled")
+    if not CRYPTO_EMAIL_ENABLED:
+        reasons.append("crypto_email_disabled")
+    if not creds["has_sender"]:
+        reasons.append("missing_email_from")
+    if not creds["has_recipient"]:
+        reasons.append("missing_email_to")
+    if not (creds["has_oauth"] or creds["has_smtp"]):
+        reasons.append("missing_transport_credentials")
+    actionable = [s for s in signals if s.get("action") in ("BUY", "SELL")]
+    if not actionable:
+        reasons.append("no_crypto_buy_sell_signals")
+    return {
+        "ok_to_send": len(reasons) == 0,
+        "reasons": reasons,
+        "actionable_count": len(actionable),
+        "actionable_symbols": [s.get("symbol") for s in actionable[:10]],
+        "policy_mode": CRYPTO_EMAIL_MODE,
+        "credentials": creds,
+    }
 
 # Modello Pydantic per asset
 class AssetModel(BaseModel):
@@ -763,6 +880,8 @@ state = {
     "crypto_alert_snapshot": {},
     "crypto_live": {},
     "crypto_live_last": None,
+    "last_email_reason": "not_evaluated",
+    "last_crypto_email_reason": "not_evaluated",
 }
 
 _backtest_cache: dict = {}  # {symbol: result}
@@ -971,18 +1090,23 @@ def run_scan():
     state["signals"] = signals
 
     # Step 4: email
-    log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')}")
-    # â"€â"€ Step 4: Email - SOLO in finestra â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-    if not is_trading_hours():
-        log.info("[STEP 4/4 EMAIL] SKIPPED - fuori finestra operativa (nessuna email notturna)")
-    elif OPTIONS.get("email_enabled"):
+    email_diag = _evaluate_equity_email_status(signals)
+    state["last_email_reason"] = ",".join(email_diag["reasons"]) if email_diag["reasons"] else "sent_or_sendable"
+    log.info(f"[STEP 4/4 EMAIL] enabled={OPTIONS.get('email_enabled')} | policy={EMAIL_SIGNAL_MODE} | reasons={email_diag['reasons'] or ['none']}")
+    if email_diag["ok_to_send"]:
         try:
-            # Adapt signals list for mailer (expects 'results' format)
             ok = send_report(signals, run_ts, next_ts, OPTIONS, state.get('smart_money'))
-            state["email_last"] = run_ts; state["email_ok"] = ok
+            state["email_last"] = run_ts if ok else state.get("email_last")
+            state["email_ok"] = ok
+            if not ok and state["last_email_reason"] == "sent_or_sendable":
+                state["last_email_reason"] = "mailer_returned_false"
             log.info(f"[STEP 4/4 EMAIL] {'OK' if ok else 'FAILED'}")
         except Exception as e:
-            log.error(f"[STEP 4/4 EMAIL] {e}"); state["email_ok"] = False
+            log.error(f"[STEP 4/4 EMAIL] {e}")
+            state["email_ok"] = False
+            state["last_email_reason"] = f"exception:{type(e).__name__}"
+    else:
+        state["email_ok"] = False
 
     log.info(f"[SCHEDULER] DONE | active={len(active)} | "
              f"top={active[0]['symbol'] + ' ' + active[0]['action'] if active else 'none'}")
@@ -1099,12 +1223,34 @@ async def config():
             "has_fmp":bool(FMP_KEY),"has_eia":bool(EIA_KEY),"has_fred":bool(FRED_KEY),
             "macro_enabled":MACRO_ENABLED,"fundamental_enabled":FUND_ENABLED,
             "email_enabled":bool(OPTIONS.get("email_enabled")),
+            "email_require_trading_window": EMAIL_REQUIRE_TRADING_WINDOW,
+            "email_signal_mode": EMAIL_SIGNAL_MODE,
             "wallet_email_alerts_enabled": WALLET_ALERTS_ENABLED,
+            "crypto_email_enabled": CRYPTO_EMAIL_ENABLED,
+            "crypto_email_mode": CRYPTO_EMAIL_MODE,
             "email_to":OPTIONS.get("email_to",""),
             "smtp_host":OPTIONS.get("smtp_host",""),
             "smtp_port":OPTIONS.get("smtp_port",587),
             "email_min_score":OPTIONS.get("email_min_score",40),
             "trading_window":is_trading_hours()}
+
+
+@app.get("/api/email/status")
+async def email_status():
+    equity = _evaluate_equity_email_status(state.get("signals", []))
+    crypto = _evaluate_crypto_email_status(state.get("crypto_signals", []))
+    return {
+        "equity": {
+            **equity,
+            "last_sent_at": state.get("email_last"),
+            "last_reason": state.get("last_email_reason"),
+        },
+        "crypto": {
+            **crypto,
+            "last_sent_at": state.get("crypto_email_last"),
+            "last_reason": state.get("last_crypto_email_reason"),
+        },
+    }
 
 @app.get("/api/assets")
 async def get_assets():
