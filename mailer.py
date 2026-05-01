@@ -66,9 +66,14 @@ def _send_apppassword(msg, sender, recipient, host, port, user, pw, tls):
         log.error(f"[SMTP] {e}"); return False
 
 
-def _dispatch_email(msg, opts):
-    sender    = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
+def _resolve_sender_recipient(opts):
+    sender = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
     recipient = opts.get("email_to")
+    return sender, recipient
+
+
+def _dispatch_email(msg, opts):
+    sender, recipient = _resolve_sender_recipient(opts)
     if not sender or not recipient:
         log.error("[EMAIL] sender/recipient mancanti")
         return False
@@ -250,8 +255,7 @@ def send_wallet_alert(wallet_result: Dict, opts: Dict) -> bool:
     if not alerts:
         return True
 
-    sender    = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
-    recipient = opts.get("email_to")
+    sender, recipient = _resolve_sender_recipient(opts)
     if not sender or not recipient:
         log.error("[WALLET EMAIL] sender/recipient mancanti")
         return False
@@ -311,8 +315,7 @@ def send_crypto_alert(signals: List[Dict], opts: Dict) -> bool:
     if not alerts:
         return True
 
-    sender    = opts.get("email_from") or opts.get("smtp_user") or opts.get("email_to")
-    recipient = opts.get("email_to")
+    sender, recipient = _resolve_sender_recipient(opts)
     if not sender or not recipient:
         log.error("[CRYPTO EMAIL] sender/recipient mancanti")
         return False
@@ -592,7 +595,7 @@ def build_html_report(results: List[Dict], run_ts: str, next_ts: str, smart_mone
 # ── Entry point ────────────────────────────────────────────────────────────────
 def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict, smart_money_data: Dict = None) -> bool:
     if not cfg.get("email_enabled"): return False
-    email_to   = cfg.get("email_to","");   email_from = cfg.get("email_from","")
+    email_from, email_to = _resolve_sender_recipient(cfg)
     if not email_to or not email_from:
         log.warning("[MAILER] email_to o email_from mancanti"); return False
 
@@ -630,21 +633,4 @@ def send_report(results: List[Dict], run_ts: str, next_ts: str, cfg: Dict, smart
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject; msg["From"] = email_from; msg["To"] = email_to
     msg.attach(MIMEText(html_body,"html","utf-8"))
-
-    # OAuth2
-    cid = cfg.get("oauth2_client_id",""); csec = cfg.get("oauth2_client_secret",""); rtok = cfg.get("oauth2_refresh_token","")
-    if cid and csec and rtok:
-        log.info("[MAILER] Invio OAuth2...")
-        if _send_oauth2(msg, email_from, email_to, cid, csec, rtok): return True
-        log.warning("[MAILER] OAuth2 fallito, provo App Password")
-
-    # App Password fallback
-    user = cfg.get("smtp_user",""); pw = cfg.get("smtp_password","")
-    if user and pw:
-        log.info("[MAILER] Invio App Password...")
-        return _send_apppassword(msg, email_from, email_to,
-                                 cfg.get("smtp_host","smtp.gmail.com"),
-                                 int(cfg.get("smtp_port",587)),
-                                 user, pw, bool(cfg.get("smtp_tls",True)))
-
-    log.error("[MAILER] Nessuna credenziale configurata"); return False
+    return _dispatch_email(msg, cfg)
