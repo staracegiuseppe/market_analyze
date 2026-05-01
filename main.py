@@ -101,19 +101,33 @@ COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
 COINGECKO_MARKET_CHART_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
 CRYPTO_HISTORY_DAYS = 1
 CRYPTO_HISTORY_INTERVAL = "hourly"
+CRYPTO_ASSETS_PATHS = [
+    Path(__file__).parent / "crypto_assets.json",
+    Path("/app/crypto_assets.json"),
+    Path.cwd() / "crypto_assets.json",
+]
 
 
 def load_crypto_assets() -> list:
+    checked = []
     try:
-        if CRYPTO_ASSETS_PATH.exists():
-            return [a for a in json.load(open(CRYPTO_ASSETS_PATH, encoding="utf-8")) if a.get("enabled", True)]
+        for path in CRYPTO_ASSETS_PATHS:
+            checked.append(str(path))
+            if not path.exists():
+                continue
+            raw = json.load(open(path, encoding="utf-8"))
+            enabled = [a for a in raw if a.get("enabled", True)]
+            log.info(f"[CRYPTO] load_crypto_assets: path={path} total={len(raw)} enabled={len(enabled)}")
+            return enabled
     except Exception as e:
-        log.error(f"[CRYPTO] load_crypto_assets: {e}")
+        log.error(f"[CRYPTO] load_crypto_assets: {e} | checked={checked}")
+    log.warning(f"[CRYPTO] load_crypto_assets: nessun file trovato | checked={checked}")
     return []
 
 
 CRYPTO_ASSETS = load_crypto_assets()
 log.info(f"[STARTUP] {len(ASSETS)} assets loaded")
+log.info(f"[STARTUP] {len(CRYPTO_ASSETS)} crypto assets loaded")
 
 # Migra asset da JSON a DB alla prima avvio (solo se tabella vuota)
 if DB_ENABLED:
@@ -637,7 +651,29 @@ def run_crypto_scan() -> dict:
     try:
         assets = CRYPTO_ASSETS
         symbols = [a["symbol"] for a in assets]
+        log.info(f"[CRYPTO] run_crypto_scan: assets={len(assets)} symbols={','.join(symbols) if symbols else 'none'}")
+        if not symbols:
+            state["crypto_signals"] = []
+            state["crypto_last_run"] = datetime.utcnow().isoformat() + "Z"
+            state["crypto_next_run"] = (datetime.utcnow() + timedelta(minutes=CRYPTO_SCHEDULER_MINUTES)).isoformat() + "Z"
+            state["last_crypto_email_reason"] = "no_crypto_assets_configured"
+            return {
+                "signals": [],
+                "last_run": state["crypto_last_run"],
+                "next_run": state["crypto_next_run"],
+                "count": 0,
+                "email_last": state.get("crypto_email_last"),
+                "email_reason": state.get("last_crypto_email_reason"),
+                "diagnostic": {
+                    "assets_count": 0,
+                    "symbols": [],
+                    "loaded_paths": [str(p) for p in CRYPTO_ASSETS_PATHS],
+                },
+            }
         tech = fetch_all(symbols)
+        ok_tech = sorted([s for s, d in tech.items() if d])
+        no_data = sorted([s for s in symbols if not tech.get(s)])
+        log.info(f"[CRYPTO] run_crypto_scan: tech_ok={len(ok_tech)}/{len(symbols)} no_data={','.join(no_data) if no_data else 'none'}")
         signals = []
         for asset in assets:
             sig = build_quant_signal(tech.get(asset["symbol"]), asset)
@@ -645,6 +681,10 @@ def run_crypto_scan() -> dict:
             sig["scan_type"] = "crypto"
             signals.append(_signal_to_eur(sig))
         signals.sort(key=lambda s: (s.get("action") in ("BUY", "SELL", "WATCHLIST"), s.get("confidence", 0), s.get("score", 0)), reverse=True)
+        action_counts = {}
+        for s in signals:
+            action_counts[s.get("action", "UNKNOWN")] = action_counts.get(s.get("action", "UNKNOWN"), 0) + 1
+        log.info(f"[CRYPTO] run_crypto_scan: action_counts={action_counts}")
         now = datetime.utcnow()
         current_snapshot = {s["symbol"]: s.get("action") for s in signals if s.get("action") in ("BUY", "SELL")}
         previous_snapshot = state.get("crypto_alert_snapshot", {}) or {}
@@ -690,6 +730,13 @@ def run_crypto_scan() -> dict:
             "count": len(signals),
             "email_last": state.get("crypto_email_last"),
             "email_reason": state.get("last_crypto_email_reason"),
+            "diagnostic": {
+                "assets_count": len(assets),
+                "symbols": symbols,
+                "tech_ok": ok_tech,
+                "tech_missing": no_data,
+                "action_counts": action_counts,
+            },
         }
     finally:
         state["crypto_running"] = False
@@ -699,9 +746,11 @@ def fetch_crypto_live_prices() -> dict:
     assets = CRYPTO_ASSETS
     ids = [a.get("coingecko_id") for a in assets if a.get("coingecko_id")]
     if not ids:
-        return {"prices": {}, "updated_at": None}
+        log.warning(f"[CRYPTO] fetch_crypto_live_prices: no_coingecko_ids assets={len(assets)}")
+        return {"prices": {}, "updated_at": None, "diagnostic": {"assets_count": len(assets), "ids_count": 0}}
     prices = {}
     try:
+        log.info(f"[CRYPTO] fetch_crypto_live_prices: assets={len(assets)} ids={len(ids)}")
         r = requests.get(
             COINGECKO_SIMPLE_PRICE_URL,
             params={
@@ -727,10 +776,11 @@ def fetch_crypto_live_prices() -> dict:
             }
         state["crypto_live"] = prices
         state["crypto_live_last"] = datetime.utcnow().isoformat() + "Z"
-        return {"prices": prices, "updated_at": state["crypto_live_last"], "source": "coingecko_simple_price"}
+        log.info(f"[CRYPTO] fetch_crypto_live_prices: received={len(prices)}/{len(assets)} symbols={','.join(sorted(prices.keys())) if prices else 'none'}")
+        return {"prices": prices, "updated_at": state["crypto_live_last"], "source": "coingecko_simple_price", "diagnostic": {"assets_count": len(assets), "prices_count": len(prices), "ids_count": len(ids)}}
     except Exception as e:
         log.error(f"[CRYPTO] fetch_crypto_live_prices: {e}")
-        return {"prices": state.get("crypto_live", {}), "updated_at": state.get("crypto_live_last"), "source": "cache"}
+        return {"prices": state.get("crypto_live", {}), "updated_at": state.get("crypto_live_last"), "source": "cache", "diagnostic": {"assets_count": len(assets), "prices_count": len(state.get("crypto_live", {})), "ids_count": len(ids), "error": str(e)}}
 
 
 def fetch_crypto_history() -> dict:
@@ -745,15 +795,18 @@ def fetch_crypto_history() -> dict:
                     "source": "cache",
                     "days": CRYPTO_HISTORY_DAYS,
                     "interval": CRYPTO_HISTORY_INTERVAL,
+                    "diagnostic": {"series_count": len(state.get("crypto_history", {})), "cached": True},
                 }
         except Exception:
             pass
 
     series = {}
     try:
+        log.info(f"[CRYPTO] fetch_crypto_history: trying_coingecko assets={len(CRYPTO_ASSETS)}")
         for asset in CRYPTO_ASSETS:
             coin_id = asset.get("coingecko_id")
             if not coin_id:
+                log.warning(f"[CRYPTO] fetch_crypto_history: missing coingecko_id symbol={asset.get('symbol')}")
                 continue
             r = requests.get(
                 COINGECKO_MARKET_CHART_URL.format(coin_id=coin_id),
@@ -772,14 +825,18 @@ def fetch_crypto_history() -> dict:
                 for point in prices
                 if isinstance(point, list) and len(point) >= 2
             ]
+            log.debug(f"[CRYPTO] fetch_crypto_history: {asset['symbol']} coingecko_points={len(series[asset['symbol']])}")
         state["crypto_history"] = series
         state["crypto_history_last"] = datetime.utcnow().isoformat() + "Z"
+        counts = {k: len(v) for k, v in series.items()}
+        log.info(f"[CRYPTO] fetch_crypto_history: source=coingecko series={len(series)} counts={counts}")
         return {
             "series": series,
             "updated_at": state["crypto_history_last"],
             "source": "coingecko_market_chart",
             "days": CRYPTO_HISTORY_DAYS,
             "interval": CRYPTO_HISTORY_INTERVAL,
+            "diagnostic": {"series_count": len(series), "point_counts": counts},
         }
     except Exception as e:
         log.warning(f"[CRYPTO] fetch_crypto_history CoinGecko fallback -> Yahoo: {e}")
@@ -791,24 +848,30 @@ def fetch_crypto_history() -> dict:
                 points = fetch_price_series(sym, range_="5d", interval="1h", limit=48)
                 if points:
                     series[sym] = points
+                log.info(f"[CRYPTO] fetch_crypto_history: yahoo symbol={sym} points={len(points)}")
             if series:
                 state["crypto_history"] = series
                 state["crypto_history_last"] = datetime.utcnow().isoformat() + "Z"
+                counts = {k: len(v) for k, v in series.items()}
+                log.info(f"[CRYPTO] fetch_crypto_history: source=yahoo_direct series={len(series)} counts={counts}")
                 return {
                     "series": series,
                     "updated_at": state["crypto_history_last"],
                     "source": "yahoo_direct_history_fallback",
                     "days": 5,
                     "interval": "1h",
+                    "diagnostic": {"series_count": len(series), "point_counts": counts},
                 }
         except Exception as yahoo_err:
             log.error(f"[CRYPTO] fetch_crypto_history Yahoo fallback: {yahoo_err}")
+        log.warning(f"[CRYPTO] fetch_crypto_history: empty_result cached_series={len(state.get('crypto_history', {}))}")
         return {
             "series": state.get("crypto_history", {}),
             "updated_at": state.get("crypto_history_last"),
             "source": "cache",
             "days": CRYPTO_HISTORY_DAYS,
             "interval": CRYPTO_HISTORY_INTERVAL,
+            "diagnostic": {"series_count": len(state.get("crypto_history", {})), "point_counts": {k: len(v) for k, v in state.get("crypto_history", {}).items()}},
         }
 
 
@@ -1303,6 +1366,8 @@ async def config():
             "income_scheduler_minutes": INCOME_SCHEDULER_MINUTES,
             "crypto_scheduler_minutes": CRYPTO_SCHEDULER_MINUTES,
             "crypto_live_refresh_seconds": CRYPTO_LIVE_REFRESH_SECONDS,
+            "crypto_assets_paths": [str(p) for p in CRYPTO_ASSETS_PATHS],
+            "crypto_assets_count": len(CRYPTO_ASSETS),
             "crypto_live_endpoint": COINGECKO_SIMPLE_PRICE_URL,
             "crypto_history_endpoint": "/api/crypto/history",
             "crypto_signals_endpoint": "/api/crypto/signals",

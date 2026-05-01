@@ -1704,6 +1704,7 @@ async function loadCryptoLive(){
     if(!r.ok) return;
     const d = await r.json();
     cryptoLive = d.prices || {};
+    console.info('[CRYPTO][LIVE]', d);
     if(d.updated_at){
       document.getElementById('crypto-meta').innerHTML =
         document.getElementById('crypto-meta').innerHTML.replace(/ · Live:.*$/, '')
@@ -1722,6 +1723,7 @@ async function loadCryptoHistory(){
     if(!r.ok) return;
     const d = await r.json();
     cryptoHistory = d.series || {};
+    console.info('[CRYPTO][HISTORY]', d);
     if(cryptoSignals.length) renderCryptoLiveBoard();
   }catch(e){}
 }
@@ -1739,10 +1741,15 @@ async function loadCryptoSignals(){
     const d = await r.json();
     const meth = m.ok ? await m.json() : null;
     cryptoSignals = d.signals || [];
+    console.info('[CRYPTO][SIGNALS]', d);
     document.getElementById('crypto-meta').innerHTML =
       'Ultima scansione: <b style="color:#D0DFF8">'+(d.last_run?fmtTime(d.last_run):'—')+'</b>'
       + ' · Prossima: <b style="color:#D0DFF8">'+(d.next_run?fmtTime(d.next_run):'—')+'</b>'
       + ' · Asset: <b style="color:#C8A020">'+cryptoSignals.length+'</b>';
+    if(d.diagnostic){
+      document.getElementById('crypto-meta').innerHTML += ' · Tech OK: <b style="color:#16A34A">'+((d.diagnostic.tech_ok||[]).length)+'</b>'
+        + ' · Mancanti: <b style="color:#F59E0B">'+((d.diagnostic.tech_missing||[]).length)+'</b>';
+    }
     document.getElementById('crypto-sched').textContent = 'Auto-check ogni '+(cfg.crypto_scheduler_minutes||10)+' min';
     if(meth){
       const steps = (meth.current_pipeline || []).map(x => '<div style="padding:6px 0;border-bottom:1px solid #19203022"><b style="color:#D0DFF8">'+x.step+'. '+escH(x.label)+'</b><div style="font-size:11px;color:#6B7280;margin-top:2px">'+escH(x.api)+(x.endpoint_pattern?' · '+escH(x.endpoint_pattern):'')+'</div><div style="font-size:11px;color:#9CA3AF;margin-top:3px">'+escH(x.purpose||'')+'</div></div>').join('');
@@ -1759,6 +1766,7 @@ async function loadCryptoSignals(){
   }catch(e){
     document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto: '+e.message+'</div>';
     document.getElementById('crypto-live-body').innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#DC2626">Backend crypto non raggiungibile. Se stai aprendo il file locale, usa http://127.0.0.1:8099/ oppure imposta localStorage.marketAnalyzeApiBase.</td></tr>';
+    console.error('[CRYPTO][ERROR]', e);
   }
 }
 
