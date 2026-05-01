@@ -19,7 +19,7 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy application files
 COPY *.py ./
-COPY assets.json index.html ./
+COPY assets.json crypto_assets.json index.html ./
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 

@@ -106,6 +106,17 @@ CRYPTO_ASSETS_PATHS = [
     Path("/app/crypto_assets.json"),
     Path.cwd() / "crypto_assets.json",
 ]
+DEFAULT_CRYPTO_ASSETS = [
+    {"symbol": "BTC-EUR", "coingecko_id": "bitcoin", "name": "Bitcoin (BTC)", "full_name": "Bitcoin", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "ETH-EUR", "coingecko_id": "ethereum", "name": "Ethereum (ETH)", "full_name": "Ethereum", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "SOL-EUR", "coingecko_id": "solana", "name": "Solana (SOL)", "full_name": "Solana", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "XRP-EUR", "coingecko_id": "ripple", "name": "Ripple (XRP)", "full_name": "Ripple", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "ADA-EUR", "coingecko_id": "cardano", "name": "Cardano (ADA)", "full_name": "Cardano", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "DOT-EUR", "coingecko_id": "polkadot", "name": "Polkadot (DOT)", "full_name": "Polkadot", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "MATIC-EUR", "coingecko_id": "matic-network", "name": "Polygon (MATIC)", "full_name": "Polygon", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "DOGE-EUR", "coingecko_id": "dogecoin", "name": "Dogecoin (DOGE)", "full_name": "Dogecoin", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "SHIB-EUR", "coingecko_id": "shiba-inu", "name": "Shiba Inu (SHIB)", "full_name": "Shiba Inu", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+]
 
 
 def load_crypto_assets() -> list:
@@ -121,8 +132,8 @@ def load_crypto_assets() -> list:
             return enabled
     except Exception as e:
         log.error(f"[CRYPTO] load_crypto_assets: {e} | checked={checked}")
-    log.warning(f"[CRYPTO] load_crypto_assets: nessun file trovato | checked={checked}")
-    return []
+    log.warning(f"[CRYPTO] load_crypto_assets: nessun file trovato, uso fallback embedded | checked={checked} | fallback={len(DEFAULT_CRYPTO_ASSETS)}")
+    return list(DEFAULT_CRYPTO_ASSETS)
 
 
 CRYPTO_ASSETS = load_crypto_assets()
