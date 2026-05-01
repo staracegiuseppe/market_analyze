@@ -314,13 +314,18 @@ def _recommendation_from_signal(signal: dict, holding: dict, current_price: Opti
             alert_type = "WATCH_ESCALATION"
             relevant = True
 
-    if holding.get("stop_loss") and current_price and current_price <= float(holding["stop_loss"]):
+    raw_stop_loss = holding.get("stop_loss")
+    stop_loss = float(raw_stop_loss) if raw_stop_loss not in (None, "", 0) else None
+    stop_loss_valid = bool(stop_loss and avg_price and stop_loss < avg_price)
+    if stop_loss_valid and current_price and current_price <= stop_loss:
         recommendation = "RISK_EXIT"
         alert_type = "STOP_LOSS"
         relevant = True
 
-    target_price = holding.get("target_price")
-    if target_price and current_price and current_price >= float(target_price):
+    raw_target_price = holding.get("target_price")
+    target_price = float(raw_target_price) if raw_target_price not in (None, "", 0) else None
+    target_price_valid = bool(target_price and avg_price and target_price > avg_price)
+    if target_price_valid and current_price and current_price >= target_price:
         recommendation = "TAKE_PROFIT"
         alert_type = "TARGET_REACHED"
         relevant = True
@@ -349,10 +354,16 @@ def _recommendation_from_signal(signal: dict, holding: dict, current_price: Opti
         rationale.append("Non ci sono segnali operativi forti, quindi la posizione resta in osservazione.")
     if pnl_pct:
         rationale.append(f"Performance non realizzata: {pnl_pct:+.2f}% rispetto al prezzo medio.")
-    if holding.get("target_price"):
-        rationale.append(f"Target impostato a {holding['target_price']}.")
-    if holding.get("stop_loss"):
-        rationale.append(f"Stop loss impostato a {holding['stop_loss']}.")
+    if raw_target_price:
+        if target_price_valid:
+            rationale.append(f"Target impostato a {target_price}.")
+        else:
+            rationale.append(f"Target salvato a {raw_target_price}, ma non coerente con una posizione long: ignorato nel calcolo.")
+    if raw_stop_loss:
+        if stop_loss_valid:
+            rationale.append(f"Stop loss impostato a {stop_loss}.")
+        else:
+            rationale.append(f"Stop loss salvato a {raw_stop_loss}, ma non coerente con una posizione long: ignorato nel calcolo.")
 
     return {
         "signal_action": action,

@@ -1614,8 +1614,8 @@ async function addCryptoSignalToWallet(symbol){
     asset_type: 'crypto',
     currency: 'EUR',
     exchange: signal.exchange || 'Trade Republic',
-    target_price: signal.take_profit != null ? Number(signal.take_profit) : null,
-    stop_loss: signal.stop_loss != null ? Number(signal.stop_loss) : null,
+    target_price: ['BUY','WATCHLIST','HOLD'].includes(signal.action) && signal.take_profit != null ? Number(signal.take_profit) : null,
+    stop_loss: ['BUY','WATCHLIST','HOLD'].includes(signal.action) && signal.stop_loss != null ? Number(signal.stop_loss) : null,
     horizon_days: horizonDays,
     note: 'Aggiunto dalla sezione Crypto · segnale '+(signal.action || 'HOLD')+(bounceTime.label ? ' · '+bounceTime.label : ''),
   };
