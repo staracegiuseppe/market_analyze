@@ -686,6 +686,11 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
 //  UTILITIES
 // ════════════════════════════════════════════════════════════
 function api(path){
+  if(/^https?:/i.test(path)) return path;
+  const override = localStorage.getItem('marketAnalyzeApiBase');
+  if(override) return override.replace(/\/+$/, '') + path;
+  if(window.location.protocol === 'file:') return 'http://127.0.0.1:8099' + path;
+  if(window.location.origin && /^https?:/i.test(window.location.origin)) return window.location.origin + path;
   const base = window.location.pathname
     .replace(/\/(index\.html|[^/]+\.[^/]+)$/, '')
     .replace(/\/+$/, '');
@@ -698,6 +703,23 @@ function fmtTime(t){
 function safe(v, fallback){ return (v !== undefined && v !== null) ? v : fallback; }
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function eur(v){ return v === null || v === undefined || v === '' ? '—' : '€ ' + Number(v).toFixed(2); }
+function numFmt(v, digits=2){ return v === null || v === undefined || v === '' ? '—' : Number(v).toFixed(digits); }
+function sparklineSvg(points, color){
+  if(!Array.isArray(points) || points.length < 2) return '<div style="height:42px;display:flex;align-items:center;color:#6B7280;font-size:10px">Storico non disponibile</div>';
+  const prices = points.map(p => Number(p.price)).filter(v => Number.isFinite(v));
+  if(prices.length < 2) return '<div style="height:42px;display:flex;align-items:center;color:#6B7280;font-size:10px">Storico non disponibile</div>';
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const range = Math.max(max - min, 0.0000001);
+  const width = 180;
+  const height = 42;
+  const coords = prices.map((price, idx) => {
+    const x = (idx / (prices.length - 1)) * width;
+    const y = height - (((price - min) / range) * (height - 6) + 3);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(' ');
+  return '<svg viewBox="0 0 '+width+' '+height+'" width="100%" height="'+height+'" preserveAspectRatio="none"><polyline fill="none" stroke="'+color+'" stroke-width="2.2" points="'+coords+'"></polyline></svg>';
+}
 
 // ════════════════════════════════════════════════════════════
 //  STATE
@@ -705,6 +727,7 @@ function eur(v){ return v === null || v === undefined || v === '' ? '—' : '€
 let allSignals = [];
 let cryptoSignals = [];
 let cryptoLive = {};
+let cryptoHistory = {};
 let fltMkt = 'all', fltAct = 'all';
 let cfg = {};
 let walletData = null;
@@ -1601,6 +1624,7 @@ function renderCryptoLiveBoard(){
   const tbody = document.getElementById('crypto-live-body');
   const rows = cryptoSignals.map(s => {
     const live = cryptoLive[s.symbol] || {};
+    const history = cryptoHistory[s.symbol] || [];
     const price = live.price != null ? live.price : s.price;
     const change = live.change_24h_pct;
     const act = s.action || 'HOLD';
@@ -1615,6 +1639,7 @@ function renderCryptoLiveBoard(){
       actionColor: actCol,
       confidence: s.confidence || 0,
       bias,
+      history,
     };
   });
 
@@ -1632,6 +1657,7 @@ function renderCryptoLiveBoard(){
     + '<div style="font-size:10px;font-weight:700;color:'+r.actionColor+'">'+escH(r.action)+'</div></div>'
     + '<div style="font-size:20px;font-weight:900;color:#D0DFF8">'+eur(r.price)+'</div>'
     + '<div style="margin-top:4px;font-size:11px;color:'+(r.change>=0?'#16A34A':'#DC2626')+'">'+(r.change==null?'—':(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'% 24h')+'</div>'
+    + '<div style="margin-top:8px">'+sparklineSvg(r.history, r.change>=0?'#16A34A':'#DC2626')+'</div>'
     + '<div style="margin-top:8px;height:6px;background:#1F2937;border-radius:4px"><div style="height:6px;width:'+Math.min(100,Math.abs(r.change||0)*4+8)+'%;background:'+(r.change>=0?'#16A34A':'#DC2626')+';border-radius:4px"></div></div>'
     + '</div></div>'
   ).join('');
@@ -1643,7 +1669,7 @@ function renderCryptoLiveBoard(){
     + '<td style="color:'+(r.change>=0?'#16A34A':'#DC2626')+'">'+(r.change==null?'—':(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'%')+'</td>'
     + '<td style="color:'+r.actionColor+';font-weight:700">'+escH(r.action)+'</td>'
     + '<td>'+Number(r.confidence).toFixed(0)+'%</td>'
-    + '<td style="color:#9CA3AF">'+escH(r.bias)+'</td>'
+    + '<td style="color:#9CA3AF">'+escH(r.bias)+' · '+numFmt((r.history[0]||{}).price, 4)+' → '+numFmt((r.history[r.history.length-1]||{}).price, 4)+'</td>'
     + '</tr>'
   ).join('');
 }
@@ -1663,6 +1689,16 @@ async function loadCryptoLive(){
       renderCryptoSignals();
       renderCryptoLiveBoard();
     }
+  }catch(e){}
+}
+
+async function loadCryptoHistory(){
+  try{
+    const r = await fetch(api('/api/crypto/history'));
+    if(!r.ok) return;
+    const d = await r.json();
+    cryptoHistory = d.series || {};
+    if(cryptoSignals.length) renderCryptoLiveBoard();
   }catch(e){}
 }
 
@@ -1694,9 +1730,11 @@ async function loadCryptoSignals(){
     }
     renderCryptoSignals();
     renderCryptoLiveBoard();
+    loadCryptoHistory();
     loadCryptoLive();
   }catch(e){
     document.getElementById('crypto-grid').innerHTML = '<div style="padding:30px;text-align:center;color:#DC2626">Errore crypto: '+e.message+'</div>';
+    document.getElementById('crypto-live-body').innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#DC2626">Backend crypto non raggiungibile. Se stai aprendo il file locale, usa http://127.0.0.1:8099/ oppure imposta localStorage.marketAnalyzeApiBase.</td></tr>';
   }
 }
 
@@ -2171,6 +2209,7 @@ async function loadSettings(){
       + 'FRED (Macro USA): <span style="color:'+(cfg.has_fred?'#16A34A':'#F59E0B')+'">'+(cfg.has_fred?'✓ configurato':'○ opzionale — configura fred_api_key')+'</span><br>'
       + 'EIA (Energia): <span style="color:'+(cfg.has_eia?'#16A34A':'#F59E0B')+'">'+(cfg.has_eia?'✓ configurato':'○ opzionale — configura eia_api_key')+'</span><br>'
       + 'Crypto live REST: <span style="color:#16A34A">'+escH(cfg.crypto_live_endpoint||'—')+'</span><br>'
+      + 'Crypto history REST: <span style="color:#22C55E">'+escH(cfg.crypto_history_endpoint||'—')+'</span><br>'
       + 'Crypto segnali REST: <span style="color:#60A5FA">'+escH(cfg.crypto_signals_endpoint||'—')+'</span><br>'
       + 'Crypto metodologia REST: <span style="color:#A78BFA">'+escH(cfg.crypto_methodology_endpoint||'—')+'</span><br>'
       + 'Diagnostica email REST: <span style="color:#F59E0B">/api/email/status</span><br>'
@@ -2515,6 +2554,7 @@ async function init(){
   loadSectorRotation().catch(function(e){ console.warn('sector rotation:', e); });
   loadCryptoSignals().catch(function(e){ console.warn('crypto:', e); });
   loadCryptoLive().catch(function(e){ console.warn('crypto live:', e); });
+  loadCryptoHistory().catch(function(e){ console.warn('crypto history:', e); });
   loadWallet().catch(function(e){ console.warn('wallet:', e); });
   loadIncomePlan().catch(function(e){ console.warn('income plan:', e); });
   const count = allSignals.length;
@@ -2522,6 +2562,7 @@ async function init(){
   setInterval(loadSignals, 300000);
   setInterval(loadCryptoSignals, 600000);
   setInterval(loadCryptoLive, 10000);
+  setInterval(loadCryptoHistory, 300000);
   setInterval(loadWallet, 300000);
   setInterval(loadIncomePlan, 1800000);
 }

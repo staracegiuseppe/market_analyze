@@ -98,6 +98,9 @@ CRYPTO_ASSETS_PATH = Path(__file__).parent / "crypto_assets.json"
 CRYPTO_SCHEDULER_MINUTES = 10
 CRYPTO_LIVE_REFRESH_SECONDS = 10
 COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
+COINGECKO_MARKET_CHART_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+CRYPTO_HISTORY_DAYS = 1
+CRYPTO_HISTORY_INTERVAL = "hourly"
 
 
 def load_crypto_assets() -> list:
@@ -730,6 +733,65 @@ def fetch_crypto_live_prices() -> dict:
         return {"prices": state.get("crypto_live", {}), "updated_at": state.get("crypto_live_last"), "source": "cache"}
 
 
+def fetch_crypto_history() -> dict:
+    cache_last = state.get("crypto_history_last")
+    if cache_last:
+        try:
+            last_dt = datetime.fromisoformat(str(cache_last).replace("Z", "+00:00"))
+            if datetime.utcnow() - last_dt.replace(tzinfo=None) < timedelta(minutes=5):
+                return {
+                    "series": state.get("crypto_history", {}),
+                    "updated_at": cache_last,
+                    "source": "cache",
+                    "days": CRYPTO_HISTORY_DAYS,
+                    "interval": CRYPTO_HISTORY_INTERVAL,
+                }
+        except Exception:
+            pass
+
+    series = {}
+    try:
+        for asset in CRYPTO_ASSETS:
+            coin_id = asset.get("coingecko_id")
+            if not coin_id:
+                continue
+            r = requests.get(
+                COINGECKO_MARKET_CHART_URL.format(coin_id=coin_id),
+                params={
+                    "vs_currency": "eur",
+                    "days": CRYPTO_HISTORY_DAYS,
+                    "interval": CRYPTO_HISTORY_INTERVAL,
+                },
+                timeout=8,
+            )
+            r.raise_for_status()
+            data = r.json()
+            prices = data.get("prices") or []
+            series[asset["symbol"]] = [
+                {"ts": point[0], "price": point[1]}
+                for point in prices
+                if isinstance(point, list) and len(point) >= 2
+            ]
+        state["crypto_history"] = series
+        state["crypto_history_last"] = datetime.utcnow().isoformat() + "Z"
+        return {
+            "series": series,
+            "updated_at": state["crypto_history_last"],
+            "source": "coingecko_market_chart",
+            "days": CRYPTO_HISTORY_DAYS,
+            "interval": CRYPTO_HISTORY_INTERVAL,
+        }
+    except Exception as e:
+        log.error(f"[CRYPTO] fetch_crypto_history: {e}")
+        return {
+            "series": state.get("crypto_history", {}),
+            "updated_at": state.get("crypto_history_last"),
+            "source": "cache",
+            "days": CRYPTO_HISTORY_DAYS,
+            "interval": CRYPTO_HISTORY_INTERVAL,
+        }
+
+
 def _email_credentials_status() -> dict:
     sender = OPTIONS.get("email_from", "")
     recipient = OPTIONS.get("email_to", "")
@@ -880,6 +942,8 @@ state = {
     "crypto_alert_snapshot": {},
     "crypto_live": {},
     "crypto_live_last": None,
+    "crypto_history": {},
+    "crypto_history_last": None,
     "last_email_reason": "not_evaluated",
     "last_crypto_email_reason": "not_evaluated",
 }
@@ -1217,6 +1281,7 @@ async def config():
             "crypto_scheduler_minutes": CRYPTO_SCHEDULER_MINUTES,
             "crypto_live_refresh_seconds": CRYPTO_LIVE_REFRESH_SECONDS,
             "crypto_live_endpoint": COINGECKO_SIMPLE_PRICE_URL,
+            "crypto_history_endpoint": "/api/crypto/history",
             "crypto_signals_endpoint": "/api/crypto/signals",
             "crypto_methodology_endpoint": "/api/crypto/methodology",
             "has_anthropic":bool(CLAUDE_KEY),"has_perplexity":bool(PPLX_KEY),
@@ -1566,6 +1631,11 @@ async def get_crypto_signals(action: Optional[str] = None):
 @app.get("/api/crypto/live")
 async def get_crypto_live():
     return fetch_crypto_live_prices()
+
+
+@app.get("/api/crypto/history")
+async def get_crypto_history():
+    return fetch_crypto_history()
 
 
 @app.post("/api/crypto/refresh")
