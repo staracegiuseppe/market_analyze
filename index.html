@@ -520,9 +520,9 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
     <div class="pb" style="padding:0">
       <div style="overflow:auto">
         <table class="trade-table" style="width:100%">
-          <thead><tr><th>Crypto</th><th>Prezzo</th><th>24h</th><th>Segnale</th><th>Conf.</th><th>Bias</th></tr></thead>
+          <thead><tr><th>Crypto</th><th>Prezzo</th><th>24h</th><th>Segnale</th><th>Conf.</th><th>Bias</th><th></th></tr></thead>
           <tbody id="crypto-live-body">
-            <tr><td colspan="6" style="padding:24px;text-align:center;color:#6B7280">Caricamento mercato crypto...</td></tr>
+            <tr><td colspan="7" style="padding:24px;text-align:center;color:#6B7280">Caricamento mercato crypto...</td></tr>
           </tbody>
         </table>
       </div>
@@ -605,7 +605,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
           <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">PREZZO MEDIO</div><input id="wh-avg" type="number" step="0.0001" placeholder="175.50" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
           <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">TARGET</div><input id="wh-target" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
           <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">STOP LOSS</div><input id="wh-stop" type="number" step="0.0001" placeholder="facoltativo" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
-          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">MERCATO</div><select id="wh-market" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"><option value="US">USA</option><option value="IT">Italia</option><option value="EU">Europa</option></select></div>
+          <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">MERCATO</div><select id="wh-market" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"><option value="US">USA</option><option value="IT">Italia</option><option value="EU">Europa</option><option value="CRYPTO">Crypto</option></select></div>
           <div><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ORIZZONTE (GIORNI)</div><input id="wh-horizon" type="number" min="1" step="1" value="30" style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px"></div>
         </div>
         <div style="margin-top:10px"><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">NOTE</div><textarea id="wh-note" rows="3" placeholder="Motivo ingresso, setup, nota personale..." style="width:100%;background:#07090D;color:#F9FAFB;border:1px solid #374151;border-radius:5px;padding:8px 10px;font-size:13px;resize:vertical"></textarea></div>
@@ -758,6 +758,14 @@ let walletData = null;
 let walletHoldings = [];
 let walletClosedHoldings = [];
 let walletEditSymbol = null;
+let walletFormMeta = {
+  full_name: '',
+  isin: '',
+  country: 'US',
+  asset_type: 'stock',
+  currency: 'USD',
+  exchange: '',
+};
 let incomePlan = null;
 
 // ════════════════════════════════════════════════════════════
@@ -782,8 +790,8 @@ function showTab(id){
 // ════════════════════════════════════════════════════════════
 function colAct(a){ return {BUY:'#16A34A',SELL:'#DC2626',WATCHLIST:'#2563EB'}[a]||'#6B7280'; }
 function lblAct(a){ return {BUY:'🟢 ACQUISTO',SELL:'🔴 VENDITA',WATCHLIST:'🔵 DA OSSERVARE',HOLD:'⚪ NEUTRO',NO_DATA:'⚫ NESSUN DATO'}[a]||a; }
-function lblMkt(m){ return {IT:'🇮🇹 Italia',EU:'🇪🇺 Europa',US:'🇺🇸 USA'}[m]||m; }
-function lblTipo(t){ return {stock:'Azione',etf:'ETF',index:'Indice'}[t]||t; }
+function lblMkt(m){ return {IT:'🇮🇹 Italia',EU:'🇪🇺 Europa',US:'🇺🇸 USA',CRYPTO:'₿ Crypto'}[m]||m; }
+function lblTipo(t){ return {stock:'Azione',etf:'ETF',index:'Indice',crypto:'Crypto'}[t]||t; }
 
 // Traduzione motivazioni
 const TRAD = {
@@ -1045,6 +1053,8 @@ function buildCard(s){
   const divType = safe(ind.rsi_divergence, 'none');
   const bbSqueeze = safe(ind.bb_squeeze, false);
   const bounceProb = safe(ind.bounce_probability, null);
+  const bounceTime = safe(ind.bounce_time_estimate, safe(s.bounce_time_estimate, {}));
+  const bounceTimeLabel = bounceTime && bounceTime.label ? bounceTime.label : '';
   let extraHtml = '';
   if(divType !== 'none' || bbSqueeze || bounceProb !== null){
     const divCol = divType==='bullish_divergence'?'#16A34A':divType==='bearish_divergence'?'#DC2626':'#6B7280';
@@ -1053,7 +1063,14 @@ function buildCard(s){
       + (divType!=='none'?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:'+divCol+'18;color:'+divCol+';border:1px solid '+divCol+'44">'
         + (divType==='bullish_divergence'?'📈 Divergenza RSI Rialzista':'📉 Divergenza RSI Ribassista')+'</span>':'')
       + (bbSqueeze?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:#F59E0B18;color:#F59E0B;border:1px solid #F59E0B44">⚡ BB Squeeze — breakout imminente</span>':'')
-      + (bounceProb!==null?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:'+bpCol+'18;color:'+bpCol+';border:1px solid '+bpCol+'44">🎯 Prob. rimbalzo: '+bounceProb+'%</span>':'')
+      + (bounceProb!==null?'<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:'+bpCol+'18;color:'+bpCol+';border:1px solid '+bpCol+'44">🎯 Prob. rimbalzo: '+bounceProb+'%'+(bounceTimeLabel?' · '+escH(bounceTimeLabel):'')+'</span>':'')
+      + '</div>';
+  }
+
+  let walletActionHtml = '';
+  if(s.asset_type === 'crypto'){
+    walletActionHtml = '<div style="margin-top:12px;display:flex;justify-content:flex-end">'
+      + '<button class="btn" style="padding:6px 10px;font-size:11px;border-color:#16A34A44;color:#16A34A" onclick="addCryptoSignalToWallet(\''+escH(s.symbol)+'\')">+ Wallet</button>'
       + '</div>';
   }
 
@@ -1177,7 +1194,7 @@ function buildCard(s){
     + '</div><div class="conf-bar"><div style="height:5px;width:'+conf+'%;background:'+confCol+';border-radius:3px"></div></div>'
     + '</div>'
     // Body
-    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+fundHtml+riskHtml+indHtml+secHtml+instHtml+smHtml+pvHtml+aiHtml+newsHtml+'</div>'
+    + '<div class="sig-card-body">'+livelliHtml+motivHtml+bdHtml+extraHtml+fundHtml+riskHtml+indHtml+secHtml+instHtml+smHtml+pvHtml+aiHtml+newsHtml+walletActionHtml+'</div>'
     + '</div>';
 }
 
@@ -1342,6 +1359,14 @@ function walletRecColor(rec){
 
 function resetWalletForm(){
   walletEditSymbol = null;
+  walletFormMeta = {
+    full_name: '',
+    isin: '',
+    country: 'US',
+    asset_type: 'stock',
+    currency: 'USD',
+    exchange: '',
+  };
   ['wh-symbol','wh-name','wh-qty','wh-avg','wh-target','wh-stop','wh-note'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('wh-market').value = 'US';
   document.getElementById('wh-horizon').value = '30';
@@ -1351,6 +1376,14 @@ function resetWalletForm(){
 
 function fillWalletForm(h){
   walletEditSymbol = h.symbol;
+  walletFormMeta = {
+    full_name: h.full_name || h.name || '',
+    isin: h.isin || '',
+    country: h.country || 'US',
+    asset_type: h.asset_type || 'stock',
+    currency: h.currency || 'USD',
+    exchange: h.exchange || '',
+  };
   document.getElementById('wh-symbol').value = h.symbol || '';
   document.getElementById('wh-symbol').disabled = true;
   document.getElementById('wh-name').value = h.name || '';
@@ -1358,7 +1391,7 @@ function fillWalletForm(h){
   document.getElementById('wh-avg').value = h.avg_price || '';
   document.getElementById('wh-target').value = h.target_price || '';
   document.getElementById('wh-stop').value = h.stop_loss || '';
-  document.getElementById('wh-market').value = h.market || 'US';
+  document.getElementById('wh-market').value = h.market || (h.asset_type === 'crypto' ? 'CRYPTO' : 'US');
   document.getElementById('wh-horizon').value = h.horizon_days || 30;
   document.getElementById('wh-note').value = h.note || '';
   document.getElementById('wallet-form-msg').textContent = 'Modifica posizione: '+h.symbol;
@@ -1508,8 +1541,14 @@ async function saveWalletHolding(){
   const payload = {
     symbol: document.getElementById('wh-symbol').value.trim().toUpperCase(),
     name: document.getElementById('wh-name').value.trim(),
+    full_name: walletFormMeta.full_name || document.getElementById('wh-name').value.trim(),
+    isin: walletFormMeta.isin || '',
     quantity: Number(document.getElementById('wh-qty').value),
     avg_price: Number(document.getElementById('wh-avg').value),
+    country: walletFormMeta.country || 'US',
+    asset_type: walletFormMeta.asset_type || 'stock',
+    currency: walletFormMeta.currency || 'USD',
+    exchange: walletFormMeta.exchange || '',
     target_price: document.getElementById('wh-target').value ? Number(document.getElementById('wh-target').value) : null,
     stop_loss: document.getElementById('wh-stop').value ? Number(document.getElementById('wh-stop').value) : null,
     market: document.getElementById('wh-market').value,
@@ -1535,6 +1574,66 @@ async function saveWalletHolding(){
   }catch(e){
     msg.style.color = '#DC2626';
     msg.textContent = e.message;
+  }
+}
+
+async function addCryptoSignalToWallet(symbol){
+  const signal = cryptoSignals.find(item => item.symbol === symbol);
+  if(!signal){
+    alert('Segnale crypto non trovato.');
+    return;
+  }
+  const qtyRaw = prompt('Quantità da aggiungere al wallet per '+symbol+':', '');
+  if(qtyRaw === null) return;
+  const quantity = Number(String(qtyRaw).replace(',', '.'));
+  if(!Number.isFinite(quantity) || quantity <= 0){
+    alert('Quantità non valida.');
+    return;
+  }
+
+  const suggestedAvg = signal.price != null ? Number(signal.price).toFixed(4) : '';
+  const avgRaw = prompt('Prezzo medio di acquisto in EUR per '+symbol+':', suggestedAvg);
+  if(avgRaw === null) return;
+  const avgPrice = Number(String(avgRaw).replace(',', '.'));
+  if(!Number.isFinite(avgPrice) || avgPrice <= 0){
+    alert('Prezzo medio non valido.');
+    return;
+  }
+
+  const bounceTime = safe((signal.indicators||{}).bounce_time_estimate, safe(signal.bounce_time_estimate, {}));
+  const horizonDays = Number(signal.horizon_days || bounceTime.days_max || 30);
+  const payload = {
+    symbol: signal.symbol,
+    name: signal.name || signal.full_name || signal.symbol,
+    full_name: signal.full_name || signal.name || signal.symbol,
+    isin: signal.isin || '',
+    quantity,
+    avg_price: avgPrice,
+    market: 'CRYPTO',
+    country: signal.country || 'INT',
+    asset_type: 'crypto',
+    currency: 'EUR',
+    exchange: signal.exchange || 'Trade Republic',
+    target_price: signal.take_profit != null ? Number(signal.take_profit) : null,
+    stop_loss: signal.stop_loss != null ? Number(signal.stop_loss) : null,
+    horizon_days: horizonDays,
+    note: 'Aggiunto dalla sezione Crypto · segnale '+(signal.action || 'HOLD')+(bounceTime.label ? ' · '+bounceTime.label : ''),
+  };
+
+  try{
+    const r = await fetch(api('/api/wallet/holdings'), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Inserimento wallet non riuscito');
+    showTab('wallet');
+    document.getElementById('wallet-form-msg').style.color = '#16A34A';
+    document.getElementById('wallet-form-msg').textContent = 'Crypto '+symbol+' aggiunta al wallet.';
+    await loadWallet();
+  }catch(e){
+    alert('Errore wallet crypto: '+e.message);
   }
 }
 
@@ -1669,7 +1768,7 @@ function renderCryptoLiveBoard(){
 
   if(!rows.length){
     board.innerHTML = '';
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#6B7280">Nessun dato live disponibile.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#6B7280">Nessun dato live disponibile.</td></tr>';
     return;
   }
 
@@ -1683,6 +1782,7 @@ function renderCryptoLiveBoard(){
     + '<div style="margin-top:4px;font-size:11px;color:'+(r.change>=0?'#16A34A':'#DC2626')+'">'+(r.change==null?'—':(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'% 24h')+'</div>'
     + '<div style="margin-top:8px">'+sparklineSvg(r.history, r.change>=0?'#16A34A':'#DC2626')+'</div>'
     + '<div style="margin-top:8px;height:6px;background:#1F2937;border-radius:4px"><div style="height:6px;width:'+Math.min(100,Math.abs(r.change||0)*4+8)+'%;background:'+(r.change>=0?'#16A34A':'#DC2626')+';border-radius:4px"></div></div>'
+    + '<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn" style="padding:5px 9px;font-size:10px;border-color:#16A34A44;color:#16A34A" onclick="addCryptoSignalToWallet(\''+escH(r.symbol)+'\')">+ Wallet</button></div>'
     + '</div></div>'
   ).join('');
 
@@ -1694,6 +1794,7 @@ function renderCryptoLiveBoard(){
     + '<td style="color:'+r.actionColor+';font-weight:700">'+escH(r.action)+'</td>'
     + '<td>'+Number(r.confidence).toFixed(0)+'%</td>'
     + '<td style="color:#9CA3AF">'+escH(r.bias)+' · '+numFmt((r.history[0]||{}).price, 4)+' → '+numFmt((r.history[r.history.length-1]||{}).price, 4)+'</td>'
+    + '<td><button class="btn" style="padding:4px 8px;font-size:10px;border-color:#16A34A44;color:#16A34A" onclick="addCryptoSignalToWallet(\''+escH(r.symbol)+'\')">+ Wallet</button></td>'
     + '</tr>'
   ).join('');
 }
@@ -2618,6 +2719,7 @@ window.loadWallet    = loadWallet;
 window.loadIncomePlan = loadIncomePlan;
 window.refreshIncomePlan = refreshIncomePlan;
 window.saveWalletHolding = saveWalletHolding;
+window.addCryptoSignalToWallet = addCryptoSignalToWallet;
 window.resetWalletForm = resetWalletForm;
 window.editWalletHolding = editWalletHolding;
 window.deleteWalletHolding = deleteWalletHolding;

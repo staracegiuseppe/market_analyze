@@ -422,6 +422,63 @@ def _bounce_probability(rsi, bb_pos, vs_ma200, vol_ratio, adx_val):
     return max(5, min(95, score))
 
 
+def _bounce_time_estimate(rsi, bb_pos, vs_ma200, vol_ratio, adx_val):
+    """
+    Stima prudenziale del tempo atteso per un rimbalzo tecnico.
+    Output:
+    - days_min / days_max: finestra stimata
+    - label: testo pronto UI
+    - speed: fast / medium / slow
+    """
+    speed_score = 0
+
+    if rsi < 25:
+        speed_score += 3
+    elif rsi < 30:
+        speed_score += 2
+    elif rsi < 35:
+        speed_score += 1
+    elif rsi > 55:
+        speed_score -= 2
+
+    if bb_pos < 10:
+        speed_score += 2
+    elif bb_pos < 20:
+        speed_score += 1
+    elif bb_pos > 75:
+        speed_score -= 2
+
+    if vs_ma200 is not None:
+        if vs_ma200 < -20:
+            speed_score += 2
+        elif vs_ma200 < -10:
+            speed_score += 1
+        elif vs_ma200 > 10:
+            speed_score -= 1
+
+    if vol_ratio > 180:
+        speed_score += 2
+    elif vol_ratio > 130:
+        speed_score += 1
+    elif vol_ratio < 70:
+        speed_score -= 1
+
+    if adx_val > 35:
+        speed_score -= 3
+    elif adx_val > 25:
+        speed_score -= 1
+    elif adx_val < 18:
+        speed_score += 1
+
+    if speed_score >= 6:
+        return {"days_min": 1, "days_max": 3, "label": "entro 1-3 giorni", "speed": "fast"}
+    if speed_score >= 3:
+        return {"days_min": 3, "days_max": 7, "label": "entro 3-7 giorni", "speed": "medium"}
+    if speed_score >= 0:
+        return {"days_min": 7, "days_max": 15, "label": "entro 1-2 settimane", "speed": "medium"}
+    return {"days_min": 15, "days_max": 30, "label": "entro 2-4 settimane", "speed": "slow"}
+
+
 # ── Entry point pubblico ───────────────────────────────────────────────────────
 
 def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
@@ -461,6 +518,13 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
         squeeze  = _bb_squeeze(cl)
 
         bounce_prob = _bounce_probability(
+            rsi       = rsi_val,
+            bb_pos    = bb_data.get("position", 50),
+            vs_ma200  = ma_data.get("vs_ma200"),
+            vol_ratio = vol_data.get("ratio_pct", 100),
+            adx_val   = adx_data.get("adx", 0),
+        )
+        bounce_time = _bounce_time_estimate(
             rsi       = rsi_val,
             bb_pos    = bb_data.get("position", 50),
             vs_ma200  = ma_data.get("vs_ma200"),
@@ -531,6 +595,7 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
             "rsi_divergence":   _rsi_divergence(cl),
             "bb_squeeze_data":  squeeze,
             "bounce_probability": bounce_prob,
+            "bounce_time_estimate": bounce_time,
             "risk_metrics":     risk_metrics,
             "source":           "yahoo_direct",
         }

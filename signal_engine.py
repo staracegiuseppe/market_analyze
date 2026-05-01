@@ -77,6 +77,7 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
     rsi_div     = ind.get("rsi_divergence", "none")
     bb_sq_data  = ind.get("bb_squeeze_data", {})
     bounce_prob = ind.get("bounce_probability", None)
+    bounce_time = ind.get("bounce_time_estimate", {}) or {}
 
     ma20    = _safe(ma, "ma20")
     ma50    = _safe(ma, "ma50")
@@ -311,6 +312,7 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
         "rsi_divergence":    rsi_div,
         "bb_squeeze":        bb_squeeze,
         "bounce_probability": bounce_prob,
+        "bounce_time_estimate": bounce_time,
     }
 
     # Bonus qualità: Sharpe > 1 indica buon risk-adjusted return
@@ -337,6 +339,7 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
         "rsi_divergence":    rsi_div,
         "bb_squeeze":        bb_squeeze,
         "bounce_probability": bounce_prob,
+        "bounce_time_estimate": bounce_time,
         "value_trap_flag":   is_value_trap,
         "action_effective":  action if is_trading_hours() else "HOLD (market closed)",
         "risk_metrics":      risk_metrics,
