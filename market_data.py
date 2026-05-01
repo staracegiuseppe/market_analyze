@@ -87,14 +87,14 @@ def _get_session() -> requests.Session:
     return s
 
 
-def _yahoo_fetch_raw(symbol: str, range_: str = "1y") -> Optional[Dict]:
+def _yahoo_fetch_raw(symbol: str, range_: str = "1y", interval: str = "1d") -> Optional[Dict]:
     """
     Chiama Yahoo Finance Chart API direttamente.
     Prova query1 poi query2. Retry 3 volte con backoff.
     Log dettagliato ogni passo.
     """
     session = _get_session()
-    params  = {"interval": "1d", "range": range_}
+    params  = {"interval": interval, "range": range_}
 
     for attempt in range(1, 4):
         for base_url in [YAHOO_CHART_URL, YAHOO_CHART_URL2]:
@@ -145,6 +145,31 @@ def _yahoo_fetch_raw(symbol: str, range_: str = "1y") -> Optional[Dict]:
 
     log.error(f"[MARKET] {symbol}: tutti i tentativi falliti — restituisco NO_DATA")
     return None
+
+
+def fetch_price_series(symbol: str, range_: str = "5d", interval: str = "1h", limit: int = 48) -> List[Dict]:
+    """
+    Ritorna una serie prezzi semplice da Yahoo Finance Chart API.
+    Utile per sparkline e mini-grafici senza usare yfinance.Ticker().history().
+    Output: [{"ts": <epoch_ms>, "price": <float>}]
+    """
+    raw = _yahoo_fetch_raw(symbol, range_=range_, interval=interval)
+    if raw is None:
+        return []
+    df = _raw_to_dataframe(raw, symbol)
+    if df is None or df.empty or "Close" not in df.columns:
+        return []
+    out = []
+    for idx, row in df.tail(limit).iterrows():
+        try:
+            ts = idx.to_pydatetime() if hasattr(idx, "to_pydatetime") else idx
+            out.append({
+                "ts": int(ts.timestamp() * 1000),
+                "price": float(row["Close"]),
+            })
+        except Exception:
+            continue
+    return out
 
 
 def _raw_to_dataframe(raw: Dict, symbol: str) -> Optional[pd.DataFrame]:

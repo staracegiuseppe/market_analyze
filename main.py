@@ -10,7 +10,7 @@ from typing     import Optional, List
 import uvicorn
 import requests
 
-from market_data            import fetch_all, load_assets, lookup_isin, _save_assets, assets_json_path
+from market_data            import fetch_all, load_assets, lookup_isin, _save_assets, assets_json_path, fetch_price_series
 from smart_money            import run_smart_money_analysis, build_email_section, validate_signals_with_perplexity
 from macro_layer            import fetch_macro_context
 from fundamental_layer      import fetch_all_fundamentals
@@ -784,21 +784,11 @@ def fetch_crypto_history() -> dict:
     except Exception as e:
         log.warning(f"[CRYPTO] fetch_crypto_history CoinGecko fallback -> Yahoo: {e}")
         try:
-            import yfinance as yf
             for asset in CRYPTO_ASSETS:
                 sym = asset.get("symbol")
                 if not sym:
                     continue
-                df = yf.Ticker(sym).history(period="2d", interval="60m", auto_adjust=True)
-                if df is None or df.empty or "Close" not in df.columns:
-                    continue
-                points = []
-                for idx, row in df.tail(36).iterrows():
-                    ts = idx.to_pydatetime() if hasattr(idx, "to_pydatetime") else idx
-                    points.append({
-                        "ts": int(ts.timestamp() * 1000),
-                        "price": float(row["Close"]),
-                    })
+                points = fetch_price_series(sym, range_="5d", interval="1h", limit=48)
                 if points:
                     series[sym] = points
             if series:
@@ -807,9 +797,9 @@ def fetch_crypto_history() -> dict:
                 return {
                     "series": series,
                     "updated_at": state["crypto_history_last"],
-                    "source": "yahoo_history_fallback",
-                    "days": CRYPTO_HISTORY_DAYS,
-                    "interval": "60m",
+                    "source": "yahoo_direct_history_fallback",
+                    "days": 5,
+                    "interval": "1h",
                 }
         except Exception as yahoo_err:
             log.error(f"[CRYPTO] fetch_crypto_history Yahoo fallback: {yahoo_err}")
