@@ -11,6 +11,17 @@ import requests as _req
 
 log = logging.getLogger("mailer")
 
+_LAST_EMAIL_DIAG: Dict = {
+    "status": "idle",
+    "reason": None,
+    "detail": None,
+    "transport": None,
+    "attempts": [],
+    "updated_at": None,
+}
+_LAST_OAUTH_ERROR: Dict = {}
+_LAST_SMTP_ERROR: Dict = {}
+
 try:
     from smart_money import build_email_section as _sm_section
     _HAS_SM = True
@@ -20,7 +31,21 @@ except ImportError:
 # ── OAuth2 ────────────────────────────────────────────────────────────────────
 _tok: Dict = {"access_token": None, "expires_at": 0}
 
+
+def _set_email_diag(**kwargs):
+    global _LAST_EMAIL_DIAG
+    _LAST_EMAIL_DIAG = {
+        **_LAST_EMAIL_DIAG,
+        **kwargs,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def get_email_diagnostic() -> Dict:
+    return dict(_LAST_EMAIL_DIAG)
+
 def _access_token(cid, csecret, rtoken):
+    global _LAST_OAUTH_ERROR
     if _tok["access_token"] and _tok["expires_at"] > time.time() + 60:
         return _tok["access_token"]
     try:
@@ -33,13 +58,32 @@ def _access_token(cid, csecret, rtoken):
             _tok["access_token"] = d["access_token"]
             _tok["expires_at"]   = time.time() + int(d.get("expires_in", 3600))
             log.info("[OAUTH2] access_token OK")
+            _LAST_OAUTH_ERROR = {}
             return _tok["access_token"]
+        try:
+            err = r.json()
+        except Exception:
+            err = {"raw": r.text[:300]}
+        _LAST_OAUTH_ERROR = {
+            "status": "failed",
+            "transport": "oauth2",
+            "reason": err.get("error") or "oauth2_token_error",
+            "detail": err.get("error_description") or err.get("raw") or r.text[:300],
+            "http_status": r.status_code,
+        }
         log.error(f"[OAUTH2] {r.status_code}: {r.text[:150]}")
     except Exception as e:
+        _LAST_OAUTH_ERROR = {
+            "status": "failed",
+            "transport": "oauth2",
+            "reason": "oauth2_exception",
+            "detail": str(e),
+        }
         log.error(f"[OAUTH2] {e}")
     return None
 
 def _send_oauth2(msg, sender, recipient, cid, csecret, rtoken):
+    global _LAST_OAUTH_ERROR
     token = _access_token(cid, csecret, rtoken)
     if not token: return False
     auth = base64.b64encode(f"user={sender}\x01auth=Bearer {token}\x01\x01".encode()).decode()
@@ -49,20 +93,41 @@ def _send_oauth2(msg, sender, recipient, cid, csecret, rtoken):
         code, _ = s.docmd("AUTH", "XOAUTH2 " + auth)
         if code == 334: s.docmd("")
         s.sendmail(sender, recipient, msg.as_string()); s.quit()
+        _LAST_OAUTH_ERROR = {}
         log.info("[OAUTH2] ✓"); return True
     except Exception as e:
+        _LAST_OAUTH_ERROR = {
+            "status": "failed",
+            "transport": "oauth2",
+            "reason": "oauth2_send_failed",
+            "detail": str(e),
+        }
         log.error(f"[OAUTH2] {e}"); return False
 
 def _send_apppassword(msg, sender, recipient, host, port, user, pw, tls):
+    global _LAST_SMTP_ERROR
     try:
         s = smtplib.SMTP(host, port, timeout=15) if tls else smtplib.SMTP_SSL(host, port, timeout=15)
         if tls: s.ehlo(); s.starttls()
         s.login(user, pw)
         s.sendmail(sender, recipient, msg.as_string()); s.quit()
+        _LAST_SMTP_ERROR = {}
         log.info("[SMTP] ✓"); return True
     except smtplib.SMTPAuthenticationError:
+        _LAST_SMTP_ERROR = {
+            "status": "failed",
+            "transport": "smtp",
+            "reason": "smtp_auth_failed",
+            "detail": "Autenticazione SMTP fallita",
+        }
         log.error("[SMTP] Auth fallita"); return False
     except Exception as e:
+        _LAST_SMTP_ERROR = {
+            "status": "failed",
+            "transport": "smtp",
+            "reason": "smtp_exception",
+            "detail": str(e),
+        }
         log.error(f"[SMTP] {e}"); return False
 
 
@@ -75,15 +140,20 @@ def _resolve_sender_recipient(opts):
 def _dispatch_email(msg, opts):
     sender, recipient = _resolve_sender_recipient(opts)
     if not sender or not recipient:
+        _set_email_diag(status="failed", reason="missing_sender_or_recipient", detail="Sender o recipient mancanti", transport=None, attempts=[])
         log.error("[EMAIL] sender/recipient mancanti")
         return False
+    attempts = []
     cid     = opts.get("oauth2_client_id", "")
     secret  = opts.get("oauth2_client_secret", "")
     refresh = opts.get("oauth2_refresh_token", "")
     if cid and secret and refresh and sender.endswith("@gmail.com"):
         if _send_oauth2(msg, sender, recipient, cid, secret, refresh):
+            _set_email_diag(status="sent", reason="ok", detail="Invio riuscito via OAuth2", transport="oauth2", attempts=attempts + [{"transport":"oauth2","status":"sent"}])
             return True
-    return _send_apppassword(
+        if _LAST_OAUTH_ERROR:
+            attempts.append(dict(_LAST_OAUTH_ERROR))
+    ok = _send_apppassword(
         msg, sender, recipient,
         opts.get("smtp_host", "smtp.gmail.com"),
         int(opts.get("smtp_port", 587)),
@@ -91,6 +161,20 @@ def _dispatch_email(msg, opts):
         opts.get("smtp_password", ""),
         bool(opts.get("smtp_tls", True)),
     )
+    if ok:
+        _set_email_diag(status="sent", reason="ok", detail="Invio riuscito via SMTP", transport="smtp", attempts=attempts + [{"transport":"smtp","status":"sent"}])
+        return True
+    if _LAST_SMTP_ERROR:
+        attempts.append(dict(_LAST_SMTP_ERROR))
+    primary = attempts[0] if attempts else {"reason": "dispatch_failed", "detail": "Invio email fallito"}
+    _set_email_diag(
+        status="failed",
+        reason=primary.get("reason", "dispatch_failed"),
+        detail=primary.get("detail", "Invio email fallito"),
+        transport=primary.get("transport"),
+        attempts=attempts,
+    )
+    return False
 
 
 # ── Traduzione motivazioni ────────────────────────────────────────────────────

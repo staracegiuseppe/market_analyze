@@ -208,7 +208,7 @@ def _create_schema():
         CREATE TABLE IF NOT EXISTS income_plan_runs (
             id                    INT AUTO_INCREMENT PRIMARY KEY,
             run_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            scenario              VARCHAR(32),
+            scenario              TEXT,
             risk_level            VARCHAR(16),
             monthly_income_est    DECIMAL(18,2) DEFAULT 0,
             target_capital        DECIMAL(18,2) DEFAULT 0,
@@ -256,6 +256,7 @@ def _migrate_schema():
         "ALTER TABLE wallet_holdings ADD COLUMN closed_at TIMESTAMP NULL",
         "ALTER TABLE wallet_holdings ADD COLUMN exit_price DECIMAL(18,6) NULL",
         "ALTER TABLE wallet_holdings ADD COLUMN exit_note TEXT NULL",
+        "ALTER TABLE income_plan_runs MODIFY COLUMN scenario TEXT NULL",
     ]
     conn = _connect()
     try:

@@ -720,6 +720,28 @@ function sparklineSvg(points, color){
   }).join(' ');
   return '<svg viewBox="0 0 '+width+' '+height+'" width="100%" height="'+height+'" preserveAspectRatio="none"><polyline fill="none" stroke="'+color+'" stroke-width="2.2" points="'+coords+'"></polyline></svg>';
 }
+function emailDiagText(diag){
+  if(!diag) return 'Nessuna diagnostica disponibile';
+  const reason = String(diag.reason || '').toLowerCase();
+  const detail = String(diag.detail || '');
+  if(reason === 'invalid_grant') return 'OAuth Google non valido: refresh token scaduto o revocato.';
+  if(reason === 'smtp_auth_failed') return 'Fallback SMTP fallito: autenticazione username/password non valida.';
+  if(reason === 'missing_sender_or_recipient') return 'Configurazione email incompleta: mittente o destinatario mancanti.';
+  if(reason === 'oauth2_send_failed') return 'OAuth disponibile ma invio non riuscito.';
+  if(reason === 'oauth2_token_error') return 'Errore nella richiesta token OAuth.';
+  if(reason === 'smtp_exception') return 'Errore tecnico SMTP durante l\'invio.';
+  if(reason === 'ok') return detail || 'Invio email riuscito.';
+  return detail || reason || 'Diagnostica non disponibile';
+}
+function emailAttemptHtml(attempt){
+  const st = attempt.status === 'sent' ? '#16A34A' : '#DC2626';
+  const label = attempt.transport === 'oauth2' ? 'OAuth2 Gmail' : attempt.transport === 'smtp' ? 'SMTP fallback' : 'Trasporto';
+  return '<div style="padding:4px 0;border-bottom:1px solid #19203022">'
+    + '<span style="color:'+st+';font-weight:700">'+label+'</span>'
+    + ' · <span style="color:#D0DFF8">'+escH(attempt.reason || attempt.status || '—')+'</span>'
+    + (attempt.detail ? '<div style="color:#9CA3AF;font-size:10px;margin-top:2px">'+escH(attempt.detail)+'</div>' : '')
+    + '</div>';
+}
 
 // ════════════════════════════════════════════════════════════
 //  STATE
@@ -2231,10 +2253,13 @@ async function loadSettings(){
 
     const eqReasons = emailStatus?.equity?.reasons || [];
     const crReasons = emailStatus?.crypto?.reasons || [];
+    const transportDiag = emailStatus?.transport || null;
+    const attemptList = (transportDiag?.attempts || []).map(emailAttemptHtml).join('');
+    const transportSummaryColor = transportDiag?.status === 'sent' ? '#16A34A' : transportDiag?.status === 'failed' ? '#DC2626' : '#6B7280';
     document.getElementById('cfg-email').innerHTML =
       '<div style="font-size:11px;line-height:2.4;color:#6880A0">'
       + 'Abilitata: <span style="color:'+(cfg.email_enabled?'#16A34A':'#6B7280')+'">'+(cfg.email_enabled?'✓':'✗ — imposta email_enabled: true nel config')+'</span>'
-      + (cfg.email_enabled?'<br>A: <b style="color:#D0DFF8">'+cfg.email_to+'</b><br>Score minimo: <b style="color:#C8A020">'+cfg.email_min_score+'</b><br>Trasporto: <b style="color:#16A34A">sistema principale condiviso</b><br>Require trading window: <b style="color:'+(cfg.email_require_trading_window?'#F59E0B':'#16A34A')+'">'+(cfg.email_require_trading_window?'si':'no')+'</b><br>Alert wallet: <b style="color:'+(cfg.wallet_email_alerts_enabled?'#16A34A':'#6B7280')+'">'+(cfg.wallet_email_alerts_enabled?'attivi':'disattivi')+'</b><br>Alert crypto: <b style="color:'+(cfg.crypto_email_enabled?'#16A34A':'#6B7280')+'">'+(cfg.crypto_email_enabled?'attivi':'disattivi')+'</b><br>Ultima causa equity: <b style="color:#D0DFF8">'+escH((emailStatus?.equity?.last_reason)||'—')+'</b><br>Ultima causa crypto: <b style="color:#D0DFF8">'+escH((emailStatus?.crypto?.last_reason)||'—')+'</b><br>Blocchi equity: <span style="color:#F59E0B">'+escH(eqReasons.join(', ') || 'nessuno')+'</span><br>Blocchi crypto: <span style="color:#F59E0B">'+escH(crReasons.join(', ') || 'nessuno')+'</span>':'')
+      + (cfg.email_enabled?'<br>A: <b style="color:#D0DFF8">'+cfg.email_to+'</b><br>Score minimo: <b style="color:#C8A020">'+cfg.email_min_score+'</b><br>Trasporto: <b style="color:#16A34A">sistema principale condiviso</b><br>Require trading window: <b style="color:'+(cfg.email_require_trading_window?'#F59E0B':'#16A34A')+'">'+(cfg.email_require_trading_window?'si':'no')+'</b><br>Alert wallet: <b style="color:'+(cfg.wallet_email_alerts_enabled?'#16A34A':'#6B7280')+'">'+(cfg.wallet_email_alerts_enabled?'attivi':'disattivi')+'</b><br>Alert crypto: <b style="color:'+(cfg.crypto_email_enabled?'#16A34A':'#6B7280')+'">'+(cfg.crypto_email_enabled?'attivi':'disattivi')+'</b><br>Ultima causa equity: <b style="color:#D0DFF8">'+escH((emailStatus?.equity?.last_reason)||'—')+'</b><br>Ultima causa crypto: <b style="color:#D0DFF8">'+escH((emailStatus?.crypto?.last_reason)||'—')+'</b><br>Diagnosi trasporto: <b style="color:'+transportSummaryColor+'">'+escH(emailDiagText(transportDiag))+'</b><br>Blocchi equity: <span style="color:#F59E0B">'+escH(eqReasons.join(', ') || 'nessuno')+'</span><br>Blocchi crypto: <span style="color:#F59E0B">'+escH(crReasons.join(', ') || 'nessuno')+'</span>' + (attemptList ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #19203022"><div style="font-size:9px;color:#6B7280;letter-spacing:.1em;margin-bottom:4px">ULTIMI TENTATIVI INVIO</div>'+attemptList+'</div>' : '') :'')
       + '</div>';
 
   }catch(e){ console.error('loadSettings:', e); }

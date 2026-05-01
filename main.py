@@ -18,7 +18,7 @@ from scoring_engine         import run_composite_scanner, enrich_with_smart_mone
 from signal_engine          import run_scanner, build_quant_signal, is_trading_hours
 from ai_validation          import apply_ai_enrichment
 from backtest_engine        import backtest_symbol, backtest_batch, BacktestConfig
-from mailer                 import send_report, send_wallet_alert, send_crypto_alert
+from mailer                 import send_report, send_wallet_alert, send_crypto_alert, get_email_diagnostic
 from sector_rotation_layer  import fetch_sector_rotation, get_sector_score
 from institutional_layer    import fetch_institutional_score, fetch_all_institutional
 import db
@@ -782,7 +782,37 @@ def fetch_crypto_history() -> dict:
             "interval": CRYPTO_HISTORY_INTERVAL,
         }
     except Exception as e:
-        log.error(f"[CRYPTO] fetch_crypto_history: {e}")
+        log.warning(f"[CRYPTO] fetch_crypto_history CoinGecko fallback -> Yahoo: {e}")
+        try:
+            import yfinance as yf
+            for asset in CRYPTO_ASSETS:
+                sym = asset.get("symbol")
+                if not sym:
+                    continue
+                df = yf.Ticker(sym).history(period="2d", interval="60m", auto_adjust=True)
+                if df is None or df.empty or "Close" not in df.columns:
+                    continue
+                points = []
+                for idx, row in df.tail(36).iterrows():
+                    ts = idx.to_pydatetime() if hasattr(idx, "to_pydatetime") else idx
+                    points.append({
+                        "ts": int(ts.timestamp() * 1000),
+                        "price": float(row["Close"]),
+                    })
+                if points:
+                    series[sym] = points
+            if series:
+                state["crypto_history"] = series
+                state["crypto_history_last"] = datetime.utcnow().isoformat() + "Z"
+                return {
+                    "series": series,
+                    "updated_at": state["crypto_history_last"],
+                    "source": "yahoo_history_fallback",
+                    "days": CRYPTO_HISTORY_DAYS,
+                    "interval": "60m",
+                }
+        except Exception as yahoo_err:
+            log.error(f"[CRYPTO] fetch_crypto_history Yahoo fallback: {yahoo_err}")
         return {
             "series": state.get("crypto_history", {}),
             "updated_at": state.get("crypto_history_last"),
@@ -1304,7 +1334,9 @@ async def config():
 async def email_status():
     equity = _evaluate_equity_email_status(state.get("signals", []))
     crypto = _evaluate_crypto_email_status(state.get("crypto_signals", []))
+    transport = get_email_diagnostic()
     return {
+        "transport": transport,
         "equity": {
             **equity,
             "last_sent_at": state.get("email_last"),
