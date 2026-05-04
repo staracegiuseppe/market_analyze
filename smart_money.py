@@ -17,6 +17,23 @@ log = logging.getLogger("smart_money")
 # Cache: l'analisi viene rinnovata ogni 6 ore (i dati 13F cambiano lentamente)
 _CACHE: Dict = {"data": None, "ts": 0}
 CACHE_TTL = 6 * 3600  # 6 ore
+_CLAUDE_DISABLED_REASON = ""
+_PPLX_DISABLED_REASON = ""
+
+
+def _provider_error_detail(response: requests.Response) -> str:
+    try:
+        data = response.json()
+        err = data.get("error", data)
+        if isinstance(err, dict):
+            return str(err.get("message") or err.get("type") or data)[:180]
+        return str(err)[:180]
+    except Exception:
+        return response.text[:180]
+
+
+def _is_provider_disabled_status(status_code: int) -> bool:
+    return status_code in (400, 401, 402, 403, 429)
 
 
 # ── Prompt Claude — hedge fund analyst ───────────────────────────────────────
@@ -152,6 +169,11 @@ Return ONLY this JSON structure (no markdown):
 # ── Ricerca Perplexity ─────────────────────────────────────────────────────────
 def _perplexity_search(query: str, pplx_key: str, max_tokens: int = 800) -> str:
     """Cerca dati real-time su flussi istituzionali."""
+    global _PPLX_DISABLED_REASON
+    if _PPLX_DISABLED_REASON:
+        log.info(f"[SMART_MONEY] Perplexity skipped ({_PPLX_DISABLED_REASON})")
+        return ""
+
     try:
         r = requests.post(
             "https://api.perplexity.ai/chat/completions",
@@ -177,7 +199,10 @@ def _perplexity_search(query: str, pplx_key: str, max_tokens: int = 800) -> str:
                 content += "\n\nSources: " + ", ".join(cites[:5])
             log.info(f"[SMART_MONEY] Perplexity OK: {len(content)} chars, {len(cites)} cite")
             return content
-        log.warning(f"[SMART_MONEY] Perplexity {r.status_code}: {r.text[:100]}")
+        detail = _provider_error_detail(r)
+        log.warning(f"[SMART_MONEY] Perplexity {r.status_code}: {detail}")
+        if _is_provider_disabled_status(r.status_code):
+            _PPLX_DISABLED_REASON = f"HTTP {r.status_code}"
         return ""
     except Exception as e:
         log.warning(f"[SMART_MONEY] Perplexity error: {e}")
@@ -279,6 +304,11 @@ def _gather_institutional_data(watched_symbols: List[str], pplx_key: str) -> str
 # ── Analisi Claude ────────────────────────────────────────────────────────────
 def _claude_analyze(prompt: str, claude_key: str) -> Optional[Dict]:
     """Invia il prompt a Claude e ottieni l'analisi strutturata."""
+    global _CLAUDE_DISABLED_REASON
+    if _CLAUDE_DISABLED_REASON:
+        log.info(f"[SMART_MONEY] Claude skipped ({_CLAUDE_DISABLED_REASON})")
+        return None
+
     try:
         log.info("[SMART_MONEY] Invio a Claude (~" + str(len(prompt)//4) + " token)...")
         r = requests.post(
@@ -303,7 +333,10 @@ def _claude_analyze(prompt: str, claude_key: str) -> Optional[Dict]:
             n_opp = len(data.get("opportunities", []))
             log.info(f"[SMART_MONEY] Claude OK: {n_opp} opportunità trovate")
             return data
-        log.error(f"[SMART_MONEY] Claude {r.status_code}: {r.text[:150]}")
+        detail = _provider_error_detail(r)
+        log.error(f"[SMART_MONEY] Claude {r.status_code}: {detail}")
+        if _is_provider_disabled_status(r.status_code):
+            _CLAUDE_DISABLED_REASON = f"HTTP {r.status_code}"
         return None
     except json.JSONDecodeError as e:
         log.error(f"[SMART_MONEY] JSON parse error: {e}")

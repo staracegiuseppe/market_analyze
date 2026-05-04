@@ -606,7 +606,7 @@ def save_analysis_run(signals: List[Dict], macro_ctx: Optional[Dict] = None) -> 
                     return None
 
             for s in signals:
-                if s.get("action") in ("BUY", "SELL", "WATCHLIST", "HOLD"):
+                if s.get("action") in ("BUY", "SELL", "WATCHLIST", "HOLD", "INDICATOR_ERROR"):
                     # Sub-scores compatti (solo valori non-zero)
                     sub_raw = s.get("sub_scores", {})
                     sub_compact = {k: v for k, v in sub_raw.items() if v != 0}

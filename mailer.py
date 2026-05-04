@@ -153,12 +153,33 @@ def _dispatch_email(msg, opts):
             return True
         if _LAST_OAUTH_ERROR:
             attempts.append(dict(_LAST_OAUTH_ERROR))
+
+    smtp_user = opts.get("smtp_user", "")
+    smtp_password = opts.get("smtp_password", "")
+    if not smtp_user or not smtp_password:
+        attempts.append({
+            "status": "failed",
+            "transport": "smtp",
+            "reason": "smtp_not_configured",
+            "detail": "Fallback SMTP non configurato: smtp_user o smtp_password mancanti",
+        })
+        primary = attempts[0] if attempts else attempts[-1]
+        _set_email_diag(
+            status="failed",
+            reason=primary.get("reason", "dispatch_failed"),
+            detail=primary.get("detail", "Invio email fallito"),
+            transport=primary.get("transport"),
+            attempts=attempts,
+        )
+        log.warning("[SMTP] Fallback non configurato")
+        return False
+
     ok = _send_apppassword(
         msg, sender, recipient,
         opts.get("smtp_host", "smtp.gmail.com"),
         int(opts.get("smtp_port", 587)),
-        opts.get("smtp_user", ""),
-        opts.get("smtp_password", ""),
+        smtp_user,
+        smtp_password,
         bool(opts.get("smtp_tls", True)),
     )
     if ok:
@@ -567,7 +588,7 @@ def _card_hold(r: dict) -> str:
     reasons = [_tr(x) for x in r.get("reasons",[])[:2]]
     reason_str = " · ".join(reasons) if reasons else ""
     sc_str = ("+" if score>=0 else "")+str(score)
-    etiq   = {"HOLD":"⚪ Neutro","NO_DATA":"⚫ Nessun dato"}.get(action, action)
+    etiq   = {"HOLD":"⚪ Neutro","NO_DATA":"⚫ Nessun dato","INDICATOR_ERROR":"⚠ Errore indicatori"}.get(action, action)
     price_str = f"{curr} {price}" if price else "—"
     return (
         f'<tr style="border-bottom:1px solid #1F2937">'

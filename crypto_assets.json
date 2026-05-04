@@ -78,9 +78,9 @@
     "enabled": true
   },
   {
-    "symbol": "MATIC-EUR",
-    "coingecko_id": "matic-network",
-    "name": "Polygon (MATIC)",
+    "symbol": "POL-EUR",
+    "coingecko_id": "polygon-ecosystem-token",
+    "name": "Polygon (POL)",
     "full_name": "Polygon",
     "isin": "N/A - Crypto",
     "market": "CRYPTO",

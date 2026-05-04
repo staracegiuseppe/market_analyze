@@ -1,7 +1,7 @@
 name: Market Analyze
-version: 2.4.0
+version: 3.4.0
 slug: market_analyze
-description: 'Multi-Market Scanner v2.4 — 6-Layer Analysis: Technical + Macro (FRED/ECB/EIA)
+description: 'Multi-Market Scanner v3.4 — 6-Layer Analysis: Technical + Macro (FRED/ECB/EIA)
   + Regime + Sector Rotation + Institutional (FMP 13F) + Fundamental. Claude AI +
   Smart Money. Gmail OAuth2.'
 url: https://github.com/staracegiuseppe/market_analyze

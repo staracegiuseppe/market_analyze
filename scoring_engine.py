@@ -329,9 +329,9 @@ def composite_signal(
     agreement_pct = agreeing / max(1, len(scores_dir))
 
     # ── Azione finale ─────────────────────────────────────────────────────────
-    # Se il tecnico dice NO_DATA, mantieni NO_DATA
-    if action_t == "NO_DATA":
-        final_action = "NO_DATA"
+    # Se il tecnico non ha un segnale calcolabile, mantieni lo stato diagnostico.
+    if action_t in ("NO_DATA", "INDICATOR_ERROR"):
+        final_action = action_t
     elif composite_int >= BUY_THRESHOLD:
         final_action = "BUY"
     elif composite_int <= SELL_THRESHOLD:
@@ -535,7 +535,7 @@ def enrich_with_smart_money(signals: List[Dict], sm_data: Optional[Dict]) -> Lis
         sig["composite_score"] = new_composite
 
         # Re-derive action from updated composite (same thresholds)
-        if sig.get("action") not in ("NO_DATA",):
+        if sig.get("action") not in ("NO_DATA", "INDICATOR_ERROR"):
             if new_composite >= BUY_THRESHOLD:
                 sig["action"] = "BUY"
             elif new_composite <= SELL_THRESHOLD:

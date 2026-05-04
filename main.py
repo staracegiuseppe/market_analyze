@@ -113,7 +113,7 @@ DEFAULT_CRYPTO_ASSETS = [
     {"symbol": "XRP-EUR", "coingecko_id": "ripple", "name": "Ripple (XRP)", "full_name": "Ripple", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
     {"symbol": "ADA-EUR", "coingecko_id": "cardano", "name": "Cardano (ADA)", "full_name": "Cardano", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
     {"symbol": "DOT-EUR", "coingecko_id": "polkadot", "name": "Polkadot (DOT)", "full_name": "Polkadot", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
-    {"symbol": "MATIC-EUR", "coingecko_id": "matic-network", "name": "Polygon (MATIC)", "full_name": "Polygon", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
+    {"symbol": "POL-EUR", "coingecko_id": "polygon-ecosystem-token", "name": "Polygon (POL)", "full_name": "Polygon", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
     {"symbol": "DOGE-EUR", "coingecko_id": "dogecoin", "name": "Dogecoin (DOGE)", "full_name": "Dogecoin", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
     {"symbol": "SHIB-EUR", "coingecko_id": "shiba-inu", "name": "Shiba Inu (SHIB)", "full_name": "Shiba Inu", "isin": "N/A - Crypto", "market": "CRYPTO", "country": "INT", "asset_type": "crypto", "currency": "EUR", "exchange": "Trade Republic", "enabled": True},
 ]
@@ -1767,7 +1767,7 @@ async def get_crypto_methodology():
                 "label": "Market data REST",
                 "api": "Yahoo Finance Chart API",
                 "endpoint_pattern": "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-                "purpose": "Scaricare OHLCV giornaliero per BTC-EUR, ETH-EUR, SOL-EUR, XRP-EUR, ADA-EUR, DOT-EUR, MATIC-EUR, DOGE-EUR, SHIB-EUR.",
+                "purpose": "Scaricare OHLCV giornaliero per BTC-EUR, ETH-EUR, SOL-EUR, XRP-EUR, ADA-EUR, DOT-EUR, POL-EUR, DOGE-EUR, SHIB-EUR.",
             },
             {
                 "step": 2,

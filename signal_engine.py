@@ -8,7 +8,7 @@ log = logging.getLogger("signal_engine")
 
 TRADING_START = dtime(8, 0)   # Inizio analisi e invio segnali
 TRADING_END   = dtime(23, 30) # Fine analisi e invio segnali
-ACTIONS       = ("BUY", "SELL", "WATCHLIST", "HOLD", "NO_DATA")
+ACTIONS       = ("BUY", "SELL", "WATCHLIST", "HOLD", "NO_DATA", "INDICATOR_ERROR")
 
 
 def is_trading_hours() -> bool:
@@ -59,6 +59,17 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
     if ind is None:
         base["reasons"] = ["NO_DATA: real data unavailable"]
         log.info(f"[SIGNAL] {sym}: NO_DATA")
+        return base
+
+    if ind.get("indicator_error"):
+        base.update({
+            "action":        "INDICATOR_ERROR",
+            "price":         ind.get("last_price"),
+            "has_real_data": True,
+            "reasons":       [f"INDICATOR_ERROR: {ind.get('indicator_error_detail', 'calcolo indicatori fallito')}"],
+            "indicators":    {"bars": ind.get("bars"), "last_date": ind.get("last_date")},
+        })
+        log.warning(f"[SIGNAL] {sym}: INDICATOR_ERROR ({ind.get('indicator_error_detail', 'unknown')})")
         return base
 
     price   = ind["last_price"]
@@ -238,6 +249,33 @@ def build_quant_signal(ind: Optional[Dict], asset: Dict) -> Dict:
         reasons_s.append(f"⚠ Value Trap Filter: sotto MA50 {vs_ma50_val:.1f}% + MA200 {vs_ma200_val:.1f}% + perf60d {perf_60d:.1f}% → downtrend strutturale")
     else:
         breakdown["value_trap"] = 0
+
+    # ── DOGE anti-overbought filter ─────────────────────────────────────────
+    # DOGE tende a generare falsi BUY dopo spike rapidi: in ipercomprato si riduce
+    # la spinta long e si pretende una conferma più pulita.
+    if sym.upper() == "DOGE-EUR" and (rsi >= 70 or (bb_pos >= 80 and stoch_k >= 75)):
+        penalty = 14
+        bull_score = max(0, bull_score - penalty)
+        breakdown["doge_overbought_filter"] = -penalty
+        reasons_s.append(f"DOGE anti-overbought: RSI={rsi} BB={bb_pos:.0f}% Stoch={stoch_k:.0f}")
+    else:
+        breakdown["doge_overbought_filter"] = 0
+
+    # ── Low ADX directional penalty ─────────────────────────────────────────
+    # Sotto 15 il trend è debole: BUY/SELL candidati vengono smorzati verso HOLD/WATCH.
+    if adx_val < 15:
+        if bull_score > bear_score:
+            bull_score = max(0, bull_score - 8)
+            breakdown["low_adx_penalty"] = -8
+            reasons_s.append(f"ADX basso ({adx_val:.1f}) → trend non confermato")
+        elif bear_score > bull_score:
+            bear_score = max(0, bear_score - 8)
+            breakdown["low_adx_penalty"] = +8
+            reasons_b.append(f"ADX basso ({adx_val:.1f}) → trend ribassista debole")
+        else:
+            breakdown["low_adx_penalty"] = 0
+    else:
+        breakdown["low_adx_penalty"] = 0
 
     # ── Net score → action ────────────────────────────────────────────────────
     net     = bull_score - bear_score

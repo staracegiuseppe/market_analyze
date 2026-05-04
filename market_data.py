@@ -18,12 +18,41 @@ log = logging.getLogger("market_data")
 
 MIN_BARS = 52
 
+
+def safe_div(numerator, denominator, default=np.nan):
+    """Divisione sicura per indicatori: evita inf/ZeroDivision e conserva NaN gestibili."""
+    try:
+        den = denominator.replace(0, np.nan) if hasattr(denominator, "replace") else denominator
+        out = numerator / den
+        if hasattr(out, "replace"):
+            return out.replace([np.inf, -np.inf], np.nan)
+        if pd.isna(out) or np.isinf(out):
+            return default
+        return out
+    except Exception:
+        return default
+
+
+def _safe_pct(numerator, denominator, default=0.0):
+    value = safe_div(numerator, denominator, default=np.nan)
+    if pd.isna(value):
+        return default
+    return float(value) * 100
+
 # ── Yahoo Finance fetch diretto ───────────────────────────────────────────────
 
 # Simboli che Yahoo Finance mappa diversamente
 SYMBOL_MAP = {
     "FTSEMIB.MI": "FTSEMIB.MI",   # indice — tenta ^FTSEMIB se fallisce
+    # Yahoo non espone ancora stabilmente POL-EUR; mantiene lo storico del token
+    # Polygon sotto il vecchio ticker MATIC-EUR. L'asset resta POL lato app.
+    "POL-EUR": "MATIC-EUR",
 }
+
+COINGECKO_ID_MAP = {
+    "POL-EUR": "polygon-ecosystem-token",
+}
+COINGECKO_OHLC_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
 
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 YAHOO_CHART_URL2= "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -207,18 +236,47 @@ def _raw_to_dataframe(raw: Dict, symbol: str) -> Optional[pd.DataFrame]:
         return None
 
 
+def _coingecko_ohlc_dataframe(symbol: str, days: int = 365) -> Optional[pd.DataFrame]:
+    """Fallback OHLC CoinGecko per crypto non disponibili su Yahoo Chart."""
+    coin_id = COINGECKO_ID_MAP.get(symbol)
+    if not coin_id:
+        return None
+    try:
+        session = _get_session()
+        url = COINGECKO_OHLC_URL.format(coin_id=coin_id)
+        r = session.get(url, params={"vs_currency": "eur", "days": days}, timeout=20)
+        log.info(f"[MARKET] {symbol}: CoinGecko OHLC HTTP {r.status_code}")
+        if r.status_code != 200:
+            log.warning(f"[MARKET] {symbol}: CoinGecko OHLC errore — {r.text[:120]}")
+            return None
+        rows = r.json()
+        if not rows:
+            return None
+        df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close"])
+        df["Date"] = pd.to_datetime(df["Date"], unit="ms", utc=True)
+        df["Volume"] = 0
+        df = df.set_index("Date").dropna(subset=["Close"])
+        log.info(f"[MARKET] {symbol}: CoinGecko DataFrame {len(df)} righe valide "
+                 f"({df.index[0].date()} → {df.index[-1].date()})")
+        return df
+    except Exception as e:
+        log.warning(f"[MARKET] {symbol}: CoinGecko OHLC fallback error — {e}")
+        return None
+
+
 # ── Indicatori tecnici ─────────────────────────────────────────────────────────
 
 def _rsi(s, p=14):
     d=s.diff(); g=d.clip(lower=0).ewm(com=p-1,min_periods=p).mean()
     l=(-d.clip(upper=0)).ewm(com=p-1,min_periods=p).mean()
-    return round(float((100-100/(1+g/l.replace(0,np.nan))).iloc[-1]),2)
+    rs = safe_div(g, l, default=np.nan)
+    return round(float((100-safe_div(100, 1+rs, default=np.nan)).iloc[-1]),2)
 
 def _bollinger(s, p=20, k=2.0):
     mid=s.rolling(p).mean(); std=s.rolling(p).std()
     u,m,l=float((mid+k*std).iloc[-1]),float(mid.iloc[-1]),float((mid-k*std).iloc[-1])
-    last=float(s.iloc[-1]); bw=round((u-l)/m*100,2) if m else 0
-    pos=round((last-l)/(u-l)*100,1) if (u-l) else 50
+    last=float(s.iloc[-1]); bw=round(_safe_pct(u-l, m, 0),2)
+    pos=round(_safe_pct(last-l, u-l, 50),1)
     return {"upper":round(u,4),"middle":round(m,4),"lower":round(l,4),
             "position":pos,"bandwidth":bw,
             "signal":"OVERBOUGHT" if pos>80 else "OVERSOLD" if pos<20 else "NEUTRAL"}
@@ -236,11 +294,11 @@ def _ma(s):
     slope5=None
     if len(s)>=25:
         v=s.rolling(20).mean().dropna().iloc[-5:]
-        if len(v)==5: slope5=round((float(v.iloc[-1])-float(v.iloc[0]))/float(v.iloc[0])*100,3)
+        if len(v)==5: slope5=round(_safe_pct(float(v.iloc[-1])-float(v.iloc[0]), float(v.iloc[0]), 0),3)
     return {"ma20":ma20,"ma50":ma50,"ma200":ma200,
-            "vs_ma20":round((last-ma20)/ma20*100,2) if ma20 else None,
-            "vs_ma50":round((last-ma50)/ma50*100,2) if ma50 else None,
-            "vs_ma200":round((last-ma200)/ma200*100,2) if ma200 else None,
+            "vs_ma20":round(_safe_pct(last-ma20, ma20, 0),2) if ma20 else None,
+            "vs_ma50":round(_safe_pct(last-ma50, ma50, 0),2) if ma50 else None,
+            "vs_ma200":round(_safe_pct(last-ma200, ma200, 0),2) if ma200 else None,
             "cross":cross,"slope_ma20_5d":slope5}
 
 def _macd(s):
@@ -253,7 +311,7 @@ def _macd(s):
 
 def _stoch(hi,lo,cl,k=14,d=3):
     lk=lo.rolling(k).min(); hk=hi.rolling(k).max()
-    K=100*(cl-lk)/(hk-lk).replace(0,np.nan); D=K.rolling(d).mean()
+    K=100*safe_div(cl-lk, hk-lk, default=np.nan); D=K.rolling(d).mean()
     kv,dv=round(float(K.iloc[-1]),1),round(float(D.iloc[-1]),1)
     return {"k":kv,"d":dv,"signal":"OVERBOUGHT" if kv>80 else "OVERSOLD" if kv<20 else "NEUTRAL"}
 
@@ -264,9 +322,9 @@ def _adx(hi,lo,cl,p=14):
     pdm=pd.Series(np.where((up>dn)&(up>0),up,0),index=cl.index)
     ndm=pd.Series(np.where((dn>up)&(dn>0),dn,0),index=cl.index)
     atr_e=tr.ewm(alpha=1/p,adjust=False).mean()
-    pdi=100*pdm.ewm(alpha=1/p,adjust=False).mean()/atr_e.replace(0,np.nan)
-    ndi=100*ndm.ewm(alpha=1/p,adjust=False).mean()/atr_e.replace(0,np.nan)
-    dx=100*(pdi-ndi).abs()/(pdi+ndi).replace(0,np.nan)
+    pdi=100*safe_div(pdm.ewm(alpha=1/p,adjust=False).mean(), atr_e, default=np.nan)
+    ndi=100*safe_div(ndm.ewm(alpha=1/p,adjust=False).mean(), atr_e, default=np.nan)
+    dx=100*safe_div((pdi-ndi).abs(), pdi+ndi, default=np.nan)
     adx_v=float(dx.ewm(alpha=1/p,adjust=False).mean().iloc[-1])
     return {"adx":round(adx_v,2),"pdi":round(float(pdi.iloc[-1]),2),
             "ndi":round(float(ndi.iloc[-1]),2),"trending":adx_v>25}
@@ -287,7 +345,7 @@ def _obv(cl,vol):
     return {"obv":round(ov,0),"obv_ma20":round(om,0),"trend":"bullish" if ov>om else "bearish"}
 
 def _roc(cl,p=10):
-    return round(float((cl.iloc[-1]-cl.iloc[-1-p])/cl.iloc[-1-p]*100),2) if len(cl)>p else 0.0
+    return round(_safe_pct(cl.iloc[-1]-cl.iloc[-1-p], cl.iloc[-1-p], 0.0),2) if len(cl)>p else 0.0
 
 def _donchian(hi,lo,p=20):
     dh=hi.rolling(p).max(); dl=lo.rolling(p).min()
@@ -297,18 +355,18 @@ def _donchian(hi,lo,p=20):
 def _sr(hi,lo,p=20):
     sup=round(float(lo.iloc[-p:].min()),4); res=round(float(hi.iloc[-p:].max()),4)
     return {"support":sup,"resistance":res,
-            "range_pct":round((res-sup)/sup*100,2) if sup else 0}
+            "range_pct":round(_safe_pct(res-sup, sup, 0),2)}
 
 def _volume(vol):
     avg20=float(vol.rolling(20).mean().iloc[-1])
     last5=float(vol.iloc[-5:].mean())
-    ratio=round(last5/avg20*100,1) if avg20 else 100
+    ratio=round(_safe_pct(last5, avg20, 100),1)
     return {"avg20":int(avg20),"last5_avg":int(last5),"ratio_pct":ratio,
             "signal":"HIGH" if ratio>120 else "LOW" if ratio<80 else "NORMAL"}
 
 def _perf(cl):
     last=float(cl.iloc[-1])
-    def p(n): return round((last-float(cl.iloc[-(n+1)]))/float(cl.iloc[-(n+1)])*100,2) if len(cl)>n else None
+    def p(n): return round(_safe_pct(last-float(cl.iloc[-(n+1)]), float(cl.iloc[-(n+1)]), 0),2) if len(cl)>n else None
     return {"1d":p(1),"5d":p(5),"20d":p(20),"60d":p(60)}
 
 
@@ -325,7 +383,7 @@ def _rsi_divergence(cl, p=14, lookback=20):
         d = cl.diff()
         g = d.clip(lower=0).ewm(com=p-1, min_periods=p).mean()
         l = (-d.clip(upper=0)).ewm(com=p-1, min_periods=p).mean()
-        rsi_series = 100 - 100 / (1 + g / l.replace(0, np.nan))
+        rsi_series = 100 - safe_div(100, 1 + safe_div(g, l, default=np.nan), default=np.nan)
 
         price_win = cl.iloc[-lookback:]
         rsi_win   = rsi_series.iloc[-lookback:]
@@ -358,7 +416,7 @@ def _bb_squeeze(cl, p=20, lookback=100):
     try:
         mid = cl.rolling(p).mean()
         std = cl.rolling(p).std()
-        bw  = ((mid + 2*std) - (mid - 2*std)) / mid.replace(0, np.nan) * 100
+        bw  = safe_div((mid + 2*std) - (mid - 2*std), mid, default=np.nan) * 100
         bw_clean = bw.dropna()
         if len(bw_clean) < 20:
             return {"squeeze": False, "bw_percentile": 50, "breakout": "none"}
@@ -492,14 +550,22 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
     # Mappa simboli speciali (indici)
     # FTSEMIB.MI: Yahoo non supporta ^FTSEMIB via API diretta
     # Tentativo 1: FTSEMIB.MI, fallback FTSEMIB.MI con parametro diverso
-    yf_symbol = symbol
+    yf_symbol = SYMBOL_MAP.get(symbol, symbol)
+    if yf_symbol != symbol:
+        log.info(f"[MARKET] {symbol}: uso alias Yahoo {yf_symbol}")
 
     raw = _yahoo_fetch_raw(yf_symbol, range_=period)
-    if raw is None:
+    df = None
+    if raw is not None:
+        df = _raw_to_dataframe(raw, symbol)
+    if df is None and symbol in COINGECKO_ID_MAP:
+        log.info(f"[MARKET] {symbol}: fallback CoinGecko OHLC")
+        df = _coingecko_ohlc_dataframe(symbol, days=365 if period == "1y" else 30)
+
+    if raw is None and df is None:
         log.error(f"[MARKET] {symbol}: NO_DATA (fetch fallito)")
         return None
 
-    df = _raw_to_dataframe(raw, symbol)
     if df is None or len(df) < MIN_BARS:
         n = len(df) if df is not None else 0
         log.warning(f"[MARKET] {symbol}: NO_DATA — solo {n} barre valide (minimo {MIN_BARS})")
@@ -541,17 +607,17 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
             std_all = float(ret_s.std())
 
             if std_all > 0:
-                sharpe = round(float(excess.mean() / std_all * np.sqrt(252)), 2)
+                sharpe = round(float(safe_div(excess.mean(), std_all, 0) * np.sqrt(252)), 2)
             else:
                 sharpe = 0.0
 
             down = ret_s[ret_s < 0]
             if len(down) > 1:
-                sortino = round(float(excess.mean() / down.std() * np.sqrt(252)), 2)
+                sortino = round(float(safe_div(excess.mean(), down.std(), 0) * np.sqrt(252)), 2)
             else:
                 sortino = 0.0
 
-            max_dd  = round(float((cl / cl.cummax() - 1).min() * 100), 1)
+            max_dd  = round(float((safe_div(cl, cl.cummax(), default=np.nan) - 1).min() * 100), 1)
             var_95  = round(float(np.percentile(ret_s, 5) * 100), 2)
 
             # Beta vs ^GSPC
@@ -560,7 +626,7 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
             if bench is not None:
                 aligned_a, aligned_b = ret_s.align(bench, join="inner")
                 if len(aligned_a) >= 30 and float(aligned_b.var()) > 0:
-                    beta = round(float(aligned_a.cov(aligned_b) / aligned_b.var()), 2)
+                    beta = round(float(safe_div(aligned_a.cov(aligned_b), aligned_b.var(), 0)), 2)
 
             risk_metrics = {
                 "sharpe_1y":          sharpe,
@@ -576,7 +642,7 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
             "symbol":           symbol,
             "last_price":       last,
             "prev_close":       prev,
-            "change_pct":       round((last-prev)/prev*100, 2),
+            "change_pct":       round(_safe_pct(last-prev, prev, 0), 2),
             "last_date":        str(cl.index[-1].date()),
             "bars":             len(cl),
             "rsi":              rsi_val,
@@ -609,7 +675,22 @@ def fetch_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
 
     except Exception as e:
         log.error(f"[MARKET] {symbol}: errore calcolo indicatori — {type(e).__name__}: {e}")
-        return None
+        try:
+            last = round(float(df["Close"].iloc[-1]), 4)
+            prev = round(float(df["Close"].iloc[-2]), 4) if len(df) > 1 else last
+            return {
+                "symbol": symbol,
+                "last_price": last,
+                "prev_close": prev,
+                "change_pct": round(_safe_pct(last-prev, prev, 0), 2),
+                "last_date": str(df["Close"].index[-1].date()),
+                "bars": len(df),
+                "indicator_error": True,
+                "indicator_error_detail": f"{type(e).__name__}: {e}",
+                "source": "yahoo_direct",
+            }
+        except Exception:
+            return None
 
 
 def fetch_all(symbols: List[str], period: str = "1y") -> Dict[str, Optional[Dict]]:

@@ -13,6 +13,28 @@ MAX_LLM_ASSETS_PER_RUN = 3
 MIN_CONF_FOR_LLM       = 50   # skip enrichment if confidence below this
 LLM_CACHE: Dict[str, Dict] = {}
 CACHE_TTL_SEC = 3600
+_CLAUDE_DISABLED_REASON = ""
+_PPLX_DISABLED_REASON = ""
+
+
+def _disabled_payload() -> Dict:
+    return {"summary": "", "risk_flags": [], "confidence_adjustment": 0,
+            "news_bias": "neutral", "action_override": "none"}
+
+
+def _provider_error_detail(response: requests.Response) -> str:
+    try:
+        data = response.json()
+        err = data.get("error", data)
+        if isinstance(err, dict):
+            return str(err.get("message") or err.get("type") or data)[:180]
+        return str(err)[:180]
+    except Exception:
+        return response.text[:180]
+
+
+def _is_provider_disabled_status(status_code: int) -> bool:
+    return status_code in (400, 401, 402, 403, 429)
 
 
 def _cache_key(sym: str) -> str:
@@ -106,7 +128,12 @@ PPLX_PROMPT = (
 
 
 def enrich_with_claude(sig: Dict, api_key: str) -> Dict:
+    global _CLAUDE_DISABLED_REASON
     sym = sig["symbol"]
+    if _CLAUDE_DISABLED_REASON:
+        log.info(f"[AI] {sym}: Claude skipped ({_CLAUDE_DISABLED_REASON})")
+        return _disabled_payload()
+
     cached = _cached(f"claude_{sym}")
     if cached:
         log.info(f"[AI] {sym}: Claude cache hit")
@@ -132,15 +159,22 @@ def enrich_with_claude(sig: Dict, api_key: str) -> Dict:
             log.info(f"[AI] {sym}: Claude OK news_bias={result.get('news_bias')} "
                      f"adj={result.get('confidence_adjustment')}")
             return result
-        log.warning(f"[AI] {sym}: Claude {r.status_code}")
+        detail = _provider_error_detail(r)
+        log.warning(f"[AI] {sym}: Claude {r.status_code}: {detail}")
+        if _is_provider_disabled_status(r.status_code):
+            _CLAUDE_DISABLED_REASON = f"HTTP {r.status_code}"
     except Exception as e:
         log.warning(f"[AI] {sym}: Claude error: {e}")
 
-    return {"summary": "", "risk_flags": [], "confidence_adjustment": 0,
-            "news_bias": "neutral", "action_override": "none"}
+    return _disabled_payload()
 
 
 def enrich_with_perplexity(sym: str, api_key: str) -> List[Dict]:
+    global _PPLX_DISABLED_REASON
+    if _PPLX_DISABLED_REASON:
+        log.info(f"[AI] {sym}: Perplexity skipped ({_PPLX_DISABLED_REASON})")
+        return []
+
     cached = _cached(f"pplx_{sym}")
     if cached:
         log.info(f"[AI] {sym}: Perplexity cache hit")
@@ -169,7 +203,10 @@ def enrich_with_perplexity(sym: str, api_key: str) -> List[Dict]:
             _set_cache(f"pplx_{sym}", result)
             log.info(f"[AI] {sym}: Perplexity OK {len(result)} headlines")
             return result
-        log.warning(f"[AI] {sym}: Perplexity {r.status_code}")
+        detail = _provider_error_detail(r)
+        log.warning(f"[AI] {sym}: Perplexity {r.status_code}: {detail}")
+        if _is_provider_disabled_status(r.status_code):
+            _PPLX_DISABLED_REASON = f"HTTP {r.status_code}"
     except Exception as e:
         log.warning(f"[AI] {sym}: Perplexity error: {e}")
     return []
@@ -216,6 +253,7 @@ def apply_ai_enrichment(
             "ai_news_bias":  claude_r.get("news_bias", "neutral"),
             "ai_conf_adj":   adj,
             "news":          pplx_news[:3],
+            "ok":            bool(claude_r.get("summary") or pplx_news),
         }
 
     # Merge into signals
@@ -230,7 +268,7 @@ def apply_ai_enrichment(
                  "ai_news_bias":  e["ai_news_bias"],
                  "confidence":    max(0, min(99, s["confidence"] + e["ai_conf_adj"])),
                  "news":          e["news"],
-                 "ai_enriched":   True}
+                 "ai_enriched":   e["ok"]}
         else:
             s = {**s, "ai_enriched": False}
         result.append(s)

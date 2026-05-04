@@ -507,7 +507,7 @@ html,body{height:100%;background:#07090D;color:#D0DFF8;font-family:'Segoe UI',sy
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
     <div>
       <div style="font-size:15px;font-weight:700;color:#F9FAFB">₿ Trading Crypto</div>
-      <div style="font-size:11px;color:#6B7280;margin-top:2px">Listino Trade Republic: BTC, ETH, SOL, XRP, ADA, DOT, MATIC, DOGE, SHIB</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:2px">Listino Trade Republic: BTC, ETH, SOL, XRP, ADA, DOT, POL, DOGE, SHIB</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <div class="spin" id="crypto-spin"></div>
@@ -789,7 +789,7 @@ function showTab(id){
 //  LABEL HELPERS
 // ════════════════════════════════════════════════════════════
 function colAct(a){ return {BUY:'#16A34A',SELL:'#DC2626',WATCHLIST:'#2563EB'}[a]||'#6B7280'; }
-function lblAct(a){ return {BUY:'🟢 ACQUISTO',SELL:'🔴 VENDITA',WATCHLIST:'🔵 DA OSSERVARE',HOLD:'⚪ NEUTRO',NO_DATA:'⚫ NESSUN DATO'}[a]||a; }
+function lblAct(a){ return {BUY:'🟢 ACQUISTO',SELL:'🔴 VENDITA',WATCHLIST:'🔵 DA OSSERVARE',HOLD:'⚪ NEUTRO',NO_DATA:'⚫ NESSUN DATO',INDICATOR_ERROR:'⚠ ERRORE INDICATORI'}[a]||a; }
 function lblMkt(m){ return {IT:'🇮🇹 Italia',EU:'🇪🇺 Europa',US:'🇺🇸 USA',CRYPTO:'₿ Crypto'}[m]||m; }
 function lblTipo(t){ return {stock:'Azione',etf:'ETF',index:'Indice',crypto:'Crypto'}[t]||t; }
 
